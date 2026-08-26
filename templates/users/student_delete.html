@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block title %}
+Books
+{% endblock %}
+
+{% block content %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Delete Student</title>
+</head>
+<body>
+
+<h2>Delete Student</h2>
+
+<p>
+Are you sure you want to delete
+<b>{{ profile.user.username }}</b>?
+</p>
+
+<form method="POST">
+    {% csrf_token %}
+
+    <button type="submit">Yes, Delete</button>
+
+    <a href="{% url 'student_list' %}">
+        Cancel
+    </a>
+
+</form>
+
+</body>
+</html>
+
+{% endblock %}

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Payment Unsuccessful</title>
+</head>
+<body>
+    <div style="max-width: 420px; margin: 50px auto; font-family: sans-serif; text-align: center; border: 1px solid #f5c6cb; background-color: #f8d7da; padding: 25px; border-radius: 10px;">
+        <h2 style="color: #721c24;">Payment Unsuccessful ❌</h2>
+        <p style="color: #721c24;">We were unable to process or verify your payment. Please try again.</p>
+
+        <div style="margin: 20px 0; font-size: 14px; color: #555; text-align: left; background: white; padding: 15px; border-radius: 5px;">
+            <strong>Order ID:</strong> {{ order.order_id }}<br>
+            <strong>Amount Attempted:</strong> {{ order.charged_amount }} {{ order.charged_currency }}
+        </div>
+
+        <!-- Try Again Button -->
+        <a href="{{ retry_url }}" style="display: inline-block; background-color: #dc3545; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+            Try Payment Again
+        </a>
+    </div>
+</body>
+</html>

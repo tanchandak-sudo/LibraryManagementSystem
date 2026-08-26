@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+
+{% block title %}Gift "{{ book.title }}" - Library Management System{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-lg-8 col-md-10">
+            <!-- Breadcrumb Navigation -->
+            <nav aria-label="breadcrumb" class="mb-4">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'books:book_list' %}">Catalog</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'books:book_detail' book.id %}">{{ book.title }}</a></li>
+                    <li class="breadcrumb-item active" aria-current="page">Gift Book</li>
+                </ol>
+            </nav>
+
+            <!-- Main Gift Form Card -->
+            <div class="card shadow-sm border-0 rounded-3">
+                <div class="card-header bg-primary text-white p-4 rounded-top-3">
+                    <div class="d-flex align-items-center">
+                        <i class="fa-solid fa-gift fa-2x me-3"></i>
+                        <div>
+                            <h3 class="fw-bold mb-0">Gift a Digital Book</h3>
+                            <p class="mb-0 text-white-50 small">Share the joy of reading with friends or colleagues</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-body p-4 p-md-5">
+                    <!-- Book Preview Summary -->
+                    <div class="d-flex align-items-center bg-light p-3 rounded-3 border mb-4">
+                        {% if book.cover_image %}
+                            <img src="{{ book.cover_image.url }}" alt="{{ book.title }}" class="rounded shadow-sm me-3" style="width: 60px; height: 80px; object-fit: cover;">
+                        {% else %}
+                            <div class="bg-white rounded d-flex align-items-center justify-content-center border text-secondary me-3" style="width: 60px; height: 80px;">
+                                <i class="fa-solid fa-book fa-2x opacity-50"></i>
+                            </div>
+                        {% endif %}
+                        <div class="flex-grow-1">
+                            <h5 class="fw-bold mb-1">{{ book.title }}</h5>
+                            <p class="text-muted small mb-0">by {{ book.author }}</p>
+                            <span class="badge bg-success-subtle text-success border border-success-subtle mt-1">
+                                Digital Access (PDF)
+                            </span>
+                        </div>
+                        <div class="text-end">
+                            <span class="text-muted small d-block">Price</span>
+                            <span class="fs-4 fw-bold text-primary">₹39.00</span>
+                        </div>
+                    </div>
+
+                    <!-- Gift Form -->
+                    <form method="POST" action="{% url 'books:gift_book' book.id %}">
+                        {% csrf_token %}
+
+                        <!-- Recipient Email -->
+                        <div class="mb-3">
+                            <label for="recipient_email" class="form-label fw-semibold">
+                                Recipient Email Address <span class="text-danger">*</span>
+                            </label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-white"><i class="fa-regular fa-envelope text-muted"></i></span>
+                                <input type="email" 
+                                       class="form-control" 
+                                       id="recipient_email" 
+                                       name="recipient_email" 
+                                       placeholder="friend@example.com" 
+                                       required>
+                            </div>
+                            <div class="form-text">
+                                If they don't have an account yet, we will send them an invitation link to claim their book upon sign-up.
+                            </div>
+                        </div>
+
+                        <!-- Personal Message -->
+                        <div class="mb-4">
+                            <label for="message" class="form-label fw-semibold">Personal Message (Optional)</label>
+                            <textarea class="form-control" 
+                                      id="message" 
+                                      name="message" 
+                                      rows="3" 
+                                      placeholder="Hope you enjoy reading this book! Best regards..."></textarea>
+                            <div class="form-text">This message will be included in the invitation email.</div>
+                        </div>
+
+                        <!-- Notice Box -->
+                        <div class="alert alert-info d-flex align-items-top mb-4" role="alert">
+                            <i class="fa-solid fa-circle-info me-2 mt-1"></i>
+                            <small>
+                                Upon clicking "Proceed to Pay", you will be directed to Razorpay secure checkout. Digital reading access will be granted instantly upon successful payment.
+                            </small>
+                        </div>
+
+                        <!-- Submit Buttons -->
+                        <div class="d-flex justify-content-between align-items-center pt-2">
+                            <a href="{% url 'books:book_detail' book.id %}" class="btn btn-outline-secondary">
+                                <i class="fa-solid fa-arrow-left me-1"></i> Back to Book
+                            </a>
+                            <button type="submit" class="btn btn-primary px-4 py-2 fw-semibold">
+                                <i class="fa-solid fa-lock me-2"></i> Proceed to Pay ₹39
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

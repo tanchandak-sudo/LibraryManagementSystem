@@ -1,0 +1,390 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+
+  <!-- Section 1: Media Catalog Header & Search -->
+  <div class="text-center mb-4">
+    <h2 class="fw-bold">Media Library Catalog</h2>
+    <p class="text-muted">Browse protected digital books, educational documentaries, and gallery artwork.</p>
+  </div>
+
+  <div class="row justify-content-center mb-4">
+    <div class="col-md-8">
+      <div class="input-group">
+        <input 
+          type="text" 
+          id="searchInput" 
+          class="form-control form-control-lg" 
+          placeholder="Search catalog by title, author, or creator..."
+        >
+        <button id="searchBtn" class="btn btn-primary px-4" type="button">
+          Search
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 2: Category Filter Tabs -->
+  <ul class="nav nav-tabs nav-fill mb-4" id="mediaTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link fw-bold" id="tab-all" data-category="" type="button">All Media</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link fw-bold" id="tab-books" data-category="books" type="button">Books</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link fw-bold" id="tab-documentary" data-category="documentary" type="button">Documentaries</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link fw-bold" id="tab-arts" data-category="arts" type="button">Arts</button>
+    </li>
+  </ul>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1100;">
+    <div id="cartToast" class="toast align-items-center text-white bg-success border-0" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body fw-semibold" id="cartToastMessage">
+          Item added to cart!
+        </div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading State -->
+  <div id="loadingSpinner" class="text-center my-5 d-none">
+    <div class="spinner-border text-primary" role="status">
+      <span class="visually-hidden">Loading catalog...</span>
+    </div>
+  </div>
+
+  <!-- Section 3: Dynamic Media Grid -->
+  <div class="row" id="mediaContainer">
+    <!-- Items rendered here dynamically via JS -->
+  </div>
+
+</div>
+
+<!-- Protected Media Viewer Modal -->
+<div class="modal fade" id="mediaViewerModal" tabindex="-1" aria-labelledby="mediaViewerModalLabel" aria-hidden="true" data-bs-backdrop="static">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content shadow-lg border-0">
+      <div class="modal-header bg-dark text-white">
+        <h5 class="modal-title fw-bold" id="mediaViewerModalLabel">Protected Content Viewer</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close" id="closeModalBtn"></button>
+      </div>
+      <div class="modal-body bg-light p-3" id="mediaViewerContent">
+        <!-- Protected Player / PDF Frame rendered here -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    let currentCategory = (urlParams.get('category') || '').toLowerCase();
+    let fetchedItems = [];
+    
+    const mediaContainer = document.getElementById('mediaContainer');
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const tabButtons = document.querySelectorAll('#mediaTabs .nav-link');
+    
+    const mediaViewerModal = new bootstrap.Modal(document.getElementById('mediaViewerModal'));
+    const mediaViewerContent = document.getElementById('mediaViewerContent');
+    const mediaViewerModalLabel = document.getElementById('mediaViewerModalLabel');
+
+    const baseApiUrl = "{% url 'books:media_catalog_api' %}";
+    const addToCartApiUrl = "{% url 'books:add_to_cart_single_api' %}";
+
+    function syncActiveTab() {
+        tabButtons.forEach(btn => {
+            const btnCategory = (btn.getAttribute('data-category') || '').toLowerCase();
+            if (btnCategory === currentCategory) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    function showToast(message, isSuccess = true) {
+        const toastEl = document.getElementById('cartToast');
+        const toastMessage = document.getElementById('cartToastMessage');
+        toastEl.className = `toast align-items-center text-white ${isSuccess ? 'bg-success' : 'bg-danger'} border-0`;
+        toastMessage.textContent = message;
+        const toast = new bootstrap.Toast(toastEl);
+        toast.show();
+    }
+
+    function fetchMedia() {
+        if (loadingSpinner) loadingSpinner.classList.remove('d-none');
+        mediaContainer.innerHTML = '';
+
+        const params = new URLSearchParams({
+            category: currentCategory,
+            search: searchInput.value.trim()
+        });
+
+        fetch(`${baseApiUrl}?${params.toString()}`)
+            .then(response => {
+                if (!response.ok) throw new Error(`Server returned ${response.status}`);
+                return response.json();
+            })
+            .then(data => {
+                if (loadingSpinner) loadingSpinner.classList.add('d-none');
+                fetchedItems = data;
+                renderMedia(data);
+            })
+            .catch(error => {
+                if (loadingSpinner) loadingSpinner.classList.add('d-none');
+                console.error('Catalog fetch error:', error);
+                mediaContainer.innerHTML = `
+                    <div class="col-12 text-center text-danger my-4">
+                        <p>Unable to load media catalog items right now.</p>
+                    </div>`;
+            });
+    }
+
+    function renderMedia(items) {
+        mediaContainer.innerHTML = '';
+
+        if (!Array.isArray(items) || items.length === 0) {
+            mediaContainer.innerHTML = `
+                <div class="col-12 text-center text-muted my-4">
+                    <p class="fs-5">No catalog items match your current selection.</p>
+                </div>`;
+            return;
+        }
+
+        items.forEach((item, index) => {
+            const streamUrl = item.stream_url || item.file_url;
+            const hasValidFile = streamUrl && streamUrl !== '#';
+            const isPurchased = item.is_purchased || false;
+            
+            const itemPrice = (item.price && parseFloat(item.price) > 0) 
+                ? parseFloat(item.price).toFixed(2) 
+                : '39.00';
+            
+            let viewButtonHtml = '';
+            if (isPurchased) {
+                viewButtonHtml = hasValidFile 
+                    ? `<button onclick="openProtectedViewer(${index})" class="btn btn-outline-primary btn-sm fw-bold me-1">
+                           <i class="bi bi-eye"></i> View Content
+                       </button>`
+                    : `<button class="btn btn-outline-secondary btn-sm me-1" disabled>
+                           No File
+                       </button>`;
+            } else {
+                viewButtonHtml = `<button onclick="showToast('Please purchase this item to unlock and view content.', false)" class="btn btn-outline-secondary btn-sm me-1" title="Purchase required">
+                       <i class="bi bi-lock-fill"></i> Locked
+                   </button>`;
+            }
+
+            const safeTitle = (item.title || 'Item').replace(/'/g, "\\'");
+            
+            // Normalize raw category string to ensure clean backend routing
+            const rawCat = (item.category || currentCategory || 'books').toLowerCase();
+            let mappedCategory = 'books';
+            if (rawCat.includes('art')) {
+                mappedCategory = 'arts';
+            } else if (rawCat.includes('doc')) {
+                mappedCategory = 'documentary';
+            }
+
+            const cartButtonHtml = `
+                <button onclick="addToCart(${item.id}, '${mappedCategory}', '${safeTitle}')" class="btn btn-primary btn-sm fw-bold">
+                    ${isPurchased ? 'Buy Again' : 'Add to Cart'}
+                </button>`;
+
+            const purchaseBadgeHtml = isPurchased 
+                ? `<span class="badge bg-success"><i class="bi bi-check-circle"></i> Purchased</span>`
+                : `<span class="badge bg-warning text-dark"><i class="bi bi-lock"></i> Locked</span>`;
+
+            const cardHtml = `
+                <div class="col-md-4 mb-4">
+                    <div class="card h-100 shadow-sm border-0">
+                        <div class="card-body d-flex flex-column">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div>
+                                    <span class="badge bg-primary">${item.category || 'Books'}</span>
+                                    <span class="badge bg-secondary">${(item.type || item.file_extension || 'FILE').toUpperCase()}</span>
+                                </div>
+                                ${purchaseBadgeHtml}
+                            </div>
+                            <h5 class="card-title text-dark fw-bold">${item.title}</h5>
+                            <h6 class="card-subtitle mb-2 text-muted small">${item.creator || item.author || ''}</h6>
+                            <p class="card-text text-muted small flex-grow-1">${item.description || 'No description available.'}</p>
+                            
+                            <div class="d-flex justify-content-between align-items-center pt-3 border-top mt-2">
+                                <span class="fw-bold text-dark fs-5">₹${itemPrice}</span>
+                                <div>
+                                    ${viewButtonHtml}
+                                    ${cartButtonHtml}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+                
+            mediaContainer.insertAdjacentHTML('beforeend', cardHtml);
+        });
+    }
+
+    window.addToCart = function(itemId, category, title) {
+        const csrftoken = getCookie('csrftoken');
+
+        fetch(addToCartApiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrftoken || ''
+            },
+            body: JSON.stringify({
+                item_id: itemId,
+                book_id: itemId,
+                media_id: itemId,
+                title: title,
+                category: category.toLowerCase()
+            })
+        })
+        .then(async response => {
+            const data = await response.json().catch(() => null);
+
+            if (!response.ok) {
+                if (response.status === 401 || response.status === 403) {
+                    throw new Error((data && data.message) || 'Please log in to add items to your cart.');
+                }
+                throw new Error((data && data.message) || `Server error (${response.status})`);
+            }
+            return data;
+        })
+        .then(data => {
+            if (data.status === 'success' || data.success) {
+                showToast(data.message || `'${title}' added to cart!`, true);
+                
+                // Update all matching cart badges in sidebar/navbar
+                const cartBadges = document.querySelectorAll('#cart-count-badge, #cart-count, .cart-count-badge');
+                cartBadges.forEach(badge => {
+                    const newCount = data.cart_count !== undefined 
+                        ? data.cart_count 
+                        : (parseInt(badge.textContent || '0') + 1);
+                    badge.textContent = newCount;
+                    badge.classList.remove('d-none');
+                    badge.style.display = 'inline-block';
+                });
+            } else {
+                showToast(data.message || 'Failed to add item to cart.', false);
+            }
+        })
+        .catch(err => {
+            console.error('Cart Error:', err);
+            showToast(err.message || 'Error connecting to cart service.', false);
+        });
+    };
+
+    window.openProtectedViewer = function(index) {
+        const item = fetchedItems[index];
+        if (!item) return;
+
+        if (!item.is_purchased) {
+            showToast('Permission denied. Please purchase this item to access content.', false);
+            return;
+        }
+
+        const streamUrl = item.stream_url || item.file_url;
+        const mediaType = (item.type || '').toLowerCase();
+        
+        mediaViewerModalLabel.textContent = item.title;
+        mediaViewerContent.innerHTML = '';
+
+        if (mediaType === 'video' || item.is_video) {
+            mediaViewerContent.innerHTML = `
+                <div class="ratio ratio-16x9">
+                    <video controls 
+                           controlsList="nodownload noplaybackrate" 
+                           disablePictureInPicture
+                           oncontextmenu="return false;" 
+                           width="100%" 
+                           style="border-radius: 8px;">
+                        <source src="${streamUrl}" type="video/mp4">
+                        Your browser does not support video playback.
+                    </video>
+                </div>`;
+        } 
+        else if (mediaType === 'pdf' || mediaType === 'book_pdf' || item.is_document) {
+            mediaViewerContent.innerHTML = `
+                <div class="position-relative" oncontextmenu="return false;">
+                    <iframe src="${streamUrl}#toolbar=0&navpanes=0&scrollbar=0" 
+                            width="100%" 
+                            height="650px" 
+                            style="border: 1px solid #ddd; border-radius: 8px;"
+                            id="protectedIframe">
+                    </iframe>
+                    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+                </div>`;
+        } 
+        else if (mediaType === 'image' || item.is_image) {
+            mediaViewerContent.innerHTML = `
+                <div class="text-center p-2" oncontextmenu="return false;">
+                    <img src="${streamUrl}" 
+                         oncontextmenu="return false;" 
+                         ondragstart="return false;" 
+                         class="img-fluid rounded shadow-sm" 
+                         alt="${item.title}" 
+                         style="-webkit-user-select: none; user-select: none; max-height: 650px;">
+                </div>`;
+        }
+
+        mediaViewerModal.show();
+    };
+
+    document.getElementById('mediaViewerModal').addEventListener('hidden.bs.modal', function () {
+        mediaViewerContent.innerHTML = '';
+    });
+
+    tabButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            currentCategory = (this.getAttribute('data-category') || '').toLowerCase();
+            syncActiveTab();
+            fetchMedia();
+        });
+    });
+
+    if (searchBtn) searchBtn.addEventListener('click', fetchMedia);
+    if (searchInput) {
+        searchInput.addEventListener('keyup', function(e) {
+            if (e.key === 'Enter') fetchMedia();
+        });
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'p' || e.key === 'S' || e.key === 'P')) {
+            e.preventDefault();
+        }
+    });
+
+    syncActiveTab();
+    fetchMedia();
+});
+</script>
+{% endblock %}

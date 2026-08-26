@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+  <h2 class="mb-4">Book Requests</h2>
+
+  <!-- Search Bar -->
+  <form method="GET" action="" class="d-flex mb-4 gap-2" style="max-width: 450px;">
+    <input 
+      type="text" 
+      name="q" 
+      value="{{ search_query|default:'' }}" 
+      placeholder="Search by student, book title, or status..." 
+      class="form-control"
+    >
+    <button type="submit" class="btn btn-primary">Search</button>
+    {% if search_query %}
+      <a href="{% url 'books:book_requests' %}" class="btn btn-outline-secondary">Clear</a>
+    {% endif %}
+  </form>
+
+  <!-- Table Listing -->
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th>Student</th>
+          <th>Book Title</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for req in requests %}
+          <tr>
+            <td>{{ req.student.username }}</td>
+            <td>{{ req.book.title }}</td>
+            <td>
+              <span class="badge 
+                {% if req.status == 'APPROVED' %}bg-success
+                {% elif req.status == 'REJECTED' %}bg-danger
+                {% elif req.status == 'RETURNED' %}bg-secondary
+                {% else %}bg-warning text-dark{% endif %}">
+                {{ req.status }}
+              </span>
+            </td>
+            <td>
+              {% if req.status == 'PENDING' %}
+                <a href="{% url 'books:approve_request' req.id %}" class="btn btn-sm btn-success">Approve</a>
+                <a href="{% url 'books:reject_request' req.id %}" class="btn btn-sm btn-danger">Reject</a>
+              {% elif req.status == 'APPROVED' %}
+                <a href="{% url 'books:return_book' req.id %}" class="btn btn-sm btn-info text-white">Mark Returned</a>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="4" class="text-center text-muted">No book requests found.</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

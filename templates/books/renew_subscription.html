@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Renew Subscription</title>
+</head>
+<body>
+
+<h2>Renew Subscription</h2>
+
+<form method="POST">
+    {% csrf_token %}
+
+    <label>Select Plan</label><br><br>
+
+    <select name="plan">
+        <option value="WEEK">1 Week - ₹99</option>
+        <option value="TWOWEEK">14 Days - ₹179</option>
+        <option value="MONTH">30 Days - ₹299</option>
+    </select>
+
+    <br><br>
+
+    <button type="submit">Renew Subscription</button>
+
+</form>
+
+</body>
+</html>

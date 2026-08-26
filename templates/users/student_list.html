@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block title %}
+Books
+{% endblock %}
+
+{% block content %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student List</title>
+</head>
+<body>
+
+<h2>Student List</h2>
+
+<a href="{% url 'add_student' %}">➕ Add Student</a>
+
+<br><br>
+
+<table border="1" cellpadding="8">
+    <tr>
+        <th>Username</th>
+        <th>Email</th>
+        <th>First Name</th>
+        <th>Last Name</th>
+        <th>Role</th>
+        <th>Actions</th>
+    </tr>
+
+    {% for student in students %}
+    <tr>
+        <td>{{ student.user.username }}</td>
+        <td>{{ student.user.email }}</td>
+        <td>{{ student.user.first_name }}</td>
+        <td>{{ student.user.last_name }}</td>
+        <td>{{ student.role }}</td>
+
+        <td>
+            <a href="{% url 'edit_student' student.id %}">Edit</a> |
+            {% if request.user.user_role == 'librarian' %}
+            <a href="{% url 'delete_student' student.id %}">Delete</a>
+            {% endif %}
+        </td>
+
+    </tr>
+
+    {% empty %}
+    <tr>
+        <td colspan="6">No Students Found.</td>
+    </tr>
+    {% endfor %}
+
+</table>
+
+<br>
+
+<a href="{% url 'landing' %}">Back to Dashboard</a>
+
+</body>
+</html>
+
+{% endblock %}

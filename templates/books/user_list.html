@@ -1,0 +1,35 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>User List</title>
+</head>
+<body>
+
+  <div class="user-search-container">
+    <h2>Search Users</h2>
+    
+    <!-- Input Field -->
+    <input 
+      type="text" 
+      id="searchInput" 
+      placeholder="Search users..." 
+      autocomplete="off" 
+    />
+    
+    <!-- Loading Indicator -->
+    <p id="loadingState" style="display: none; color: #666;">Searching...</p>
+    
+    <!-- Results List -->
+    <ul id="userList">
+      <!-- Search results render here dynamically -->
+    </ul>
+  </div>
+
+  <!-- Include static JS file -->
+  <script src="{% static 'books/js/user_search.js' %}"></script>
+
+</body>
+</html>

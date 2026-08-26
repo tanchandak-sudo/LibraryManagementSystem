@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}
+Books
+{% endblock %}
+
+{% block content %}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Form</title>
+</head>
+<body>
+
+    {% if user_form.instance.pk %}
+        <h2>Edit Student</h2>
+    {% else %}
+        <h2>Add Student</h2>
+    {% endif %}
+
+    <hr>
+
+    <form method="POST">
+        {% csrf_token %}
+
+        <fieldset>
+            <legend>User Information</legend>
+
+            {{ user_form.as_p }}
+
+        </fieldset>
+
+        <br>
+
+        <fieldset>
+            <legend>Role Information</legend>
+
+            {{ profile_form.as_p }}
+
+        </fieldset>
+
+        <br>
+
+        <button type="submit">Save</button>
+        <button type="reset">Reset</button>
+
+    </form>
+
+    <br>
+
+    <a href="{% url 'student_list' %}">⬅ Back to Student List</a>
+
+</body>
+</html>
+
+{% endblock %}

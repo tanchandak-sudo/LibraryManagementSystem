@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row justify-content-center">
+        <div class="col-md-8">
+            <div class="card shadow-sm border-0 rounded-3">
+                <div class="card-header bg-dark text-white p-3">
+                    <h4 class="mb-0 fw-bold"><i class="bi bi-file-earmark-plus me-2"></i>Add New Media</h4>
+                </div>
+                <div class="card-body p-4">
+                    <form method="post" enctype="multipart/form-data" novalidate>
+                        {% csrf_token %}
+
+                        {% if form.non_field_errors %}
+                            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                                {% for error in form.non_field_errors %}
+                                    <p class="mb-0"><i class="bi bi-exclamation-triangle-fill me-2"></i>{{ error }}</p>
+                                {% endfor %}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                            </div>
+                        {% endif %}
+
+                        <div class="mb-3">
+                            <label for="{{ form.title.id_for_label }}" class="form-label fw-bold">Title</label>
+                            {{ form.title }}
+                            {% if form.title.errors %}
+                                <div class="text-danger small mt-1">{{ form.title.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.creator.id_for_label }}" class="form-label fw-bold">Creator / Author / Director</label>
+                            {{ form.creator }}
+                            {% if form.creator.errors %}
+                                <div class="text-danger small mt-1">{{ form.creator.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        {% if form.category %}
+                        <div class="mb-3">
+                            <label for="{{ form.category.id_for_label }}" class="form-label fw-bold">Category</label>
+                            {{ form.category }}
+                            {% if form.category.errors %}
+                                <div class="text-danger small mt-1">{{ form.category.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+
+                        <div class="mb-3">
+                            <label for="{{ form.quantity.id_for_label }}" class="form-label fw-bold">Quantity</label>
+                            {{ form.quantity }}
+                            {% if form.quantity.errors %}
+                                <div class="text-danger small mt-1">{{ form.quantity.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="{{ form.file.id_for_label }}" class="form-label fw-bold">Upload File</label>
+                            {{ form.file }}
+                            {% if form.file.errors %}
+                                <div class="text-danger small mt-1">{{ form.file.errors.0 }}</div>
+                            {% endif %}
+                        </div>
+
+                        <!-- Category Pricing Tier Info
+                        <div class="alert alert-light border rounded-3 p-3 my-4">
+                            <span class="fw-bold text-dark d-block mb-2">
+                                <i class="bi bi-tags-fill me-1 text-primary"></i> Category Pricing Tiers:
+                            </span>
+                            <div class="d-flex flex-wrap gap-2">
+                                <span class="badge bg-secondary-subtle text-dark border px-3 py-2">
+                                    <i class="bi bi-book me-1"></i> Books: <strong>₹39.00</strong>
+                                </span>
+                                <span class="badge bg-secondary-subtle text-dark border px-3 py-2">
+                                    <i class="bi bi-palette me-1"></i> Art: <strong>₹59.00</strong>
+                                </span>
+                                <span class="badge bg-secondary-subtle text-dark border px-3 py-2">
+                                    <i class="bi bi-film me-1"></i> Documentaries: <strong>₹109.00</strong>
+                                </span>
+                            </div>
+                        </div> -->
+
+                        <div class="d-flex justify-content-between align-items-center pt-3 border-top">
+                            <a href="{% url 'books:book_list' %}" class="btn btn-outline-secondary px-4">
+                                <i class="bi bi-arrow-left me-1"></i> Cancel
+                            </a>
+                            <button type="submit" class="btn btn-success fw-bold px-4">
+                                <i class="bi bi-cloud-upload me-1"></i> Upload Media
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

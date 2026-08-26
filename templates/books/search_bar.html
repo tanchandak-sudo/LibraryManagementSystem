@@ -1,0 +1,21 @@
+<form method="GET" action="" class="search-form flex items-center gap-2">
+    <!-- Preserve other GET params (like active currency or sorting) -->
+    {% for key, value in request.GET.items %}
+      {% if key != 'q' and key != 'page' %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}">
+      {% endif %}
+    {% endfor %}
+  
+    <input 
+      type="text" 
+      name="q" 
+      value="{{ search_query }}" 
+      placeholder="Search products..." 
+      class="form-input border rounded px-3 py-2"
+    >
+    <button type="submit" class="btn btn-primary px-4 py-2">Search</button>
+    
+    {% if search_query %}
+      <a href="{{ request.path }}" class="btn btn-secondary px-3 py-2">Clear</a>
+    {% endif %}
+  </form>

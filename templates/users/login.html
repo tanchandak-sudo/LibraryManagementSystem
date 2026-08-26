@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}
+Books
+{% endblock %}
+
+{% block content %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Library Login</title>
+</head>
+<body>
+    <h2>Library Management System</h2>
+    <p>
+        dont have an account?
+        <a href  ="{% url 'signup' %}">signup</a>
+    </p>
+    <form method="POST">
+        {%csrf_token%}
+
+        <label>Username</label><br>
+        <input type="text" name = "username"><br><br>
+
+        <label>Password</label><br>
+        <input type="password" name = "password"><br><br>
+
+        <button type ="submit">Login</button>
+    </form>
+    
+    {% if message %}
+        {% for message in message %}
+            <p>{ { message } } </p>
+        {% endfor %}
+    {% endif %}
+</body>
+</html>
+
+{% endblock %}

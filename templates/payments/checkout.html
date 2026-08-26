@@ -1,0 +1,143 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Checkout - Payment Verification{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="card shadow-lg border-0 rounded-3">
+                <div class="card-header bg-primary text-white text-center py-3">
+                    <h4 class="mb-0 fw-bold">Completing Your Purchase</h4>
+                </div>
+                <div class="card-body p-4 text-center">
+                    <div class="mb-4">
+                        <div class="spinner-border text-primary my-3" role="status" style="width: 3rem; height: 3rem;">
+                            <span class="visually-hidden">Loading Gateway...</span>
+                        </div>
+                        <h5 class="fw-semibold">Connecting to Razorpay Secure Gateway</h5>
+                        <p class="text-muted small">Please complete the transaction in the payment window.</p>
+                    </div>
+
+                    <!-- Order Details Summary -->
+                    <div class="card bg-light border-0 p-3 mb-4 text-start">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-secondary">Item / Plan:</span>
+                            <span class="fw-bold">{{ plan }}</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-2">
+                            <span class="text-secondary">Order ID:</span>
+                            <span class="text-monospace">{{ razorpay_order_id }}</span>
+                        </div>
+                        <hr class="my-2">
+                        <div class="d-flex justify-content-between fs-5 fw-bold">
+                            <span>Total Payable:</span>
+                            <span class="text-success">₹{{ amount_display|floatformat:2 }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Manual Retry Button -->
+                    <button id="rzp-button" class="btn btn-primary btn-lg w-100 shadow-sm mb-3">
+                        <i class="bi bi-credit-card-fill me-2"></i>Open Payment Window
+                    </button>
+                    
+                    <a href="{% url 'books:cart_detail' %}" class="btn btn-outline-secondary w-100">
+                        Cancel & Return to Cart
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Razorpay SDK Script -->
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    // Helper function to extract CSRF token from cookies
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    const callbackUrl = "{{ callback_url|escapejs }}";
+    const csrftoken = getCookie('csrftoken');
+
+    const options = {
+        "key": "{{ razorpay_merchant_key|escapejs }}",
+        "amount": "{{ amount_in_subunits|escapejs }}",
+        "currency": "{{ currency|escapejs }}",
+        "name": "Library Management System",
+        "description": "{{ plan|escapejs }}",
+        "image": "{% static 'images/logo.png' %}",
+        "order_id": "{{ razorpay_order_id|escapejs }}",
+        
+        "handler": function (response) {
+            // Send JSON verification payload to Django payment_callback view
+            fetch(callbackUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRFToken': csrftoken
+                },
+                body: JSON.stringify({
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_signature: response.razorpay_signature
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    window.location.href = data.redirect_url;
+                } else {
+                    alert('Payment verification failed. Please try again.');
+                    if (data.retry_url) {
+                        window.location.href = data.retry_url;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error("Error verifying payment:", error);
+                alert("An error occurred during verification. Please contact support.");
+            });
+        },
+        
+        "prefill": {
+            "name": "{{ request.user.get_full_name|default:request.user.username|escapejs }}",
+            "email": "{{ request.user.email|escapejs }}"
+        },
+        
+        "theme": {
+            "color": "#0d6efd"
+        },
+        
+        "modal": {
+            "ondismiss": function () {
+                console.log("Payment popup closed by user.");
+            }
+        }
+    };
+
+    const rzp = new Razorpay(options);
+    rzp.open();
+
+    document.getElementById('rzp-button').onclick = function (e) {
+        e.preventDefault();
+        rzp.open();
+    };
+});
+</script>
+{% endblock %}

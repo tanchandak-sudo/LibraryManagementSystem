@@ -1,0 +1,201 @@
+{% extends 'base.html' %}
+
+{% block title %}My Subscriptions | Billing & Membership{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+
+    <!-- Header & Platform Subscription Overview -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 pb-2 border-bottom">
+        <div>
+            <h2 class="fw-bold mb-1">
+                <i class="fa-solid fa-id-card text-primary me-2"></i>My Subscriptions
+            </h2>
+            <p class="text-muted mb-0">Manage your platform library pass, renewal status, and digital book access.</p>
+        </div>
+        <div class="mt-3 mt-md-0">
+            <a href="{% url 'books:buy_subscription' %}" class="btn btn-outline-primary rounded-pill px-3 fw-semibold">
+                <i class="fa-solid fa-layer-group me-1"></i> Explore All Plans
+            </a>
+        </div>
+    </div>
+
+    <!-- Active Platform Subscription Card -->
+    <div class="card border-0 shadow-sm rounded-4 mb-5 overflow-hidden">
+        <div class="card-header bg-dark text-white p-3 px-4 d-flex justify-content-between align-items-center">
+            <div class="d-flex align-items-center gap-2">
+                <i class="fa-solid fa-crown text-warning fs-5"></i>
+                <h5 class="m-0 fw-bold">Platform Digital Library Pass</h5>
+            </div>
+            {% if subscription and subscription.is_active %}
+                <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-3 py-2 fw-semibold">
+                    <i class="fa-solid fa-circle-check me-1"></i> Active Pass
+                </span>
+            {% else %}
+                <span class="badge bg-secondary-subtle text-light border border-secondary rounded-pill px-3 py-2 fw-semibold">
+                    <i class="fa-solid fa-circle-xmark me-1"></i> Inactive
+                </span>
+            {% endif %}
+        </div>
+
+        <div class="card-body p-4">
+            {% if subscription and subscription.is_active %}
+                <div class="row g-3 align-items-center">
+                    <div class="col-6 col-md-3">
+                        <div class="p-3 bg-light rounded-3">
+                            <span class="text-muted small d-block mb-1">Current Plan</span>
+                            <strong class="fs-6 text-dark">{{ subscription.get_plan_display|default:subscription.plan }}</strong>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-3 bg-light rounded-3">
+                            <span class="text-muted small d-block mb-1">Amount Paid</span>
+                            <strong class="fs-6 text-dark">{{ subscription.amount }}</strong>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-3 bg-light rounded-3">
+                            <span class="text-muted small d-block mb-1">Valid Until</span>
+                            <strong class="fs-6 text-dark">{{ subscription.end_date|date:"F d, Y" }}</strong>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-3 text-md-end mt-3 mt-md-0">
+                        <form method="POST" action="{% url 'books:buy_subscription' %}" class="d-inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="subscription_type" value="LIBRARY">
+                            <input type="hidden" name="plan" value="{{ subscription.plan|default:'MONTH' }}">
+                            <input type="hidden" name="currency" value="INR">
+                            <button type="submit" class="btn btn-primary w-100 rounded-pill fw-semibold py-2">
+                                <i class="fa-solid fa-rotate me-1"></i> Renew Subscription
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            {% else %}
+                <div class="text-center py-3">
+                    <div class="mb-3">
+                        <i class="fa-solid fa-book-reader fs-1 text-muted"></i>
+                    </div>
+                    <h5 class="fw-bold">No Active Platform Subscription</h5>
+                    <p class="text-muted small mx-auto" style="max-width: 500px;">
+                        Upgrade to an active library pass to unlock unlimited digital reading, documentary streaming, and priority borrowing limits across the entire platform.
+                    </p>
+                    
+                    <div class="d-flex justify-content-center gap-2 align-items-center flex-wrap mt-4">
+                        <form method="POST" action="{% url 'books:buy_subscription' %}" class="d-inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="subscription_type" value="LIBRARY">
+                            <input type="hidden" name="plan" value="MONTH">
+                            <input type="hidden" name="currency" value="INR">
+                            <button type="submit" class="btn btn-primary rounded-pill px-4 fw-bold">
+                                <i class="fa-solid fa-bolt me-1"></i> Instant Monthly Pass (₹299)
+                            </button>
+                        </form>
+
+                        <a href="{% url 'books:buy_subscription' %}" class="btn btn-outline-secondary rounded-pill px-4">
+                            Explore All Plans & Currencies
+                        </a>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Book Specific Subscriptions Section -->
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
+        <div>
+            <h4 class="fw-bold mb-0">
+                <i class="fa-solid fa-book-bookmark text-primary me-2"></i>Book-Specific Subscriptions
+            </h4>
+            <p class="text-muted small mb-0">Individual book access passes linked to your account.</p>
+        </div>
+
+        <!-- Search Bar -->
+        <form method="GET" action="{% url 'books:my_subscription' %}" class="d-flex gap-2" style="max-width: 400px; width: 100%;">
+            <div class="input-group">
+                <span class="input-group-text bg-white border-end-0 rounded-start-pill text-muted">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                </span>
+                <input 
+                    type="text" 
+                    name="q" 
+                    value="{{ search_query|default:'' }}" 
+                    placeholder="Search by book title or author..." 
+                    class="form-control border-start-0 rounded-end-pill"
+                >
+            </div>
+            <button type="submit" class="btn btn-primary rounded-pill px-3">Search</button>
+            {% if search_query %}
+                <a href="{% url 'books:my_subscription' %}" class="btn btn-outline-secondary rounded-pill px-3">Clear</a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Book Subscription Cards Grid -->
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+        {% for b_sub in book_subscriptions %}
+            <div class="col">
+                <div class="card h-100 shadow-sm border-0 rounded-4 transition-hover">
+                    <div class="card-body p-4 d-flex flex-column justify-content-between">
+                        <div>
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <span class="badge bg-primary-subtle text-primary fw-bold px-3 py-1 rounded-pill">
+                                    <i class="fa-solid fa-ticket me-1"></i> Book Pass
+                                </span>
+                                <small class="text-muted fw-semibold">
+                                    {{ b_sub.get_plan_display|default:b_sub.plan }}
+                                </small>
+                            </div>
+                            
+                            <h5 class="card-title fw-bold text-dark mt-2 mb-1">{{ b_sub.book.title }}</h5>
+                            <p class="card-text text-muted small mb-3">
+                                <i class="fa-solid fa-user-pen me-1 text-secondary"></i> {{ b_sub.book.author }}
+                            </p>
+
+                            <div class="p-3 bg-light rounded-3 mb-3">
+                                <div class="d-flex justify-content-between text-muted small">
+                                    <span>Access Status</span>
+                                    <span class="text-success fw-bold"><i class="fa-solid fa-circle-check"></i> Valid</span>
+                                </div>
+                                <hr class="my-2">
+                                <div class="d-flex justify-content-between text-muted small">
+                                    <span>Expires On</span>
+                                    <strong class="text-dark">{{ b_sub.end_date|date:"F d, Y" }}</strong>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card Action Buttons -->
+                        <div class="d-flex gap-2 mt-2">
+                            <a href="{% url 'books:read_book' b_sub.book.id %}" class="btn btn-sm btn-success flex-grow-1 rounded-pill fw-semibold py-2">
+                                <i class="fa-solid fa-book-open me-1"></i> Read Book
+                            </a>
+                            <form method="POST" action="{% url 'books:buy_subscription' %}" class="d-inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="subscription_type" value="BOOK">
+                                <input type="hidden" name="book_ids" value="{{ b_sub.book.id }}">
+                                <input type="hidden" name="plan" value="{{ b_sub.plan|default:'MONTH' }}">
+                                <input type="hidden" name="currency" value="INR">
+                                <button type="submit" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-2 fw-semibold" title="Renew this book pass">
+                                    <i class="fa-solid fa-arrows-rotate me-1"></i> Renew
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% empty %}
+            <div class="col-12">
+                <div class="card border-0 bg-light rounded-4 text-center py-5">
+                    <div class="card-body">
+                        <i class="fa-solid fa-book-bookmark text-muted fs-1 mb-3"></i>
+                        <h5 class="fw-bold text-dark">No Book Subscriptions Found</h5>
+                        <p class="text-muted small mb-0">You currently do not have any active individual book passes.</p>
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+
+</div>
+{% endblock %}
