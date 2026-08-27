@@ -41,7 +41,7 @@ def is_authorized_staff(user):
         return False
     if user.is_staff or user.is_superuser:
         return True
-    if hasattr(user, 'profile') and user.profile.role in ['SUPERADMIN', 'LIBRARIAN', 'LIBMANAGER']:
+    if hasattr(user, 'profile') and getattr(user.profile, 'role', None) in ['SUPERADMIN', 'LIBRARIAN', 'LIBMANAGER']:
         return True
     return False
 
@@ -145,7 +145,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             title = getattr(book, 'title', 'Untitled')
             author = getattr(book, 'author', 'N/A')
             price_val = getattr(book, 'price', 0.0)
-            price_str = f"₹{price_val:,.2f}" if isinstance(price_val, (int, float)) else "₹0.00"
+            price_str = f"₹{float(price_val or 0.0):,.2f}"
             status_str = 'AVAILABLE' if getattr(book, 'is_available', True) else 'OUT OF STOCK'
 
             row = [idx, str(book_no), title, str(author), price_str, status_str]
@@ -185,7 +185,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
                 book_no = getattr(book_obj, 'isbn', getattr(book_obj, 'id', 'N/A')) if book_obj else 'N/A'
                 book_title = getattr(book_obj, 'title', 'Book Access') if book_obj else 'Book Subscription'
                 author = getattr(book_obj, 'author', 'N/A') if book_obj else 'N/A'
-                price = f"₹{getattr(book_obj, 'price', 0.0):,.2f}" if book_obj and hasattr(book_obj, 'price') else 'N/A'
+                price = f"₹{float(getattr(book_obj, 'price', 0.0) or 0.0):,.2f}" if book_obj and hasattr(book_obj, 'price') else 'N/A'
                 raw_date = getattr(sub, date_field, None) if date_field else None
                 date_str = raw_date.strftime('%b %d, %Y') if raw_date else 'N/A'
 
@@ -311,8 +311,9 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             elif date_filter == 'this_year':
                 filter_kwargs[f'purchasedbook__{date_field}__year'] = now.year
 
+        count_filter = Q(**filter_kwargs) if filter_kwargs else None
         books_qs = Book.objects.annotate(
-            total_sold=Count('purchasedbook', filter=Q(**filter_kwargs) if filter_kwargs else None)
+            total_sold=Count('purchasedbook', filter=count_filter)
         ).order_by('-total_sold', 'title')
 
         headers = ['Sr. No.', 'Book Number', 'Book Title', 'Author', 'Price', 'Units Sold', 'Demand Tag']
@@ -324,7 +325,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             book_no = getattr(book, 'isbn', getattr(book, 'id', 'N/A'))
             title = getattr(book, 'title', 'Unknown Title')
             author = getattr(book, 'author', 'N/A')
-            p_val = getattr(book, 'price', 0.0) or 0.0
+            p_val = float(getattr(book, 'price', 0.0) or 0.0)
             price = f"₹{p_val:,.2f}"
             count = book.total_sold
             demand_tag = 'HIGH DEMAND' if count >= 5 else ('MODERATE' if count > 0 else 'NO SALES')
@@ -362,8 +363,9 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             elif date_filter == 'this_year':
                 filter_kwargs[f'purchasedbook__{date_field}__year'] = now.year
 
+        count_filter = Q(**filter_kwargs) if filter_kwargs else None
         books_qs = Book.objects.annotate(
-            total_sold=Count('purchasedbook', filter=Q(**filter_kwargs) if filter_kwargs else None)
+            total_sold=Count('purchasedbook', filter=count_filter)
         ).order_by('total_sold', 'title')
 
         headers = ['Sr. No.', 'Book Number', 'Book Title', 'Author', 'Price', 'Units Sold', 'Demand Tag']
@@ -375,7 +377,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             book_no = getattr(book, 'isbn', getattr(book, 'id', 'N/A'))
             title = getattr(book, 'title', 'Unknown Title')
             author = getattr(book, 'author', 'N/A')
-            p_val = getattr(book, 'price', 0.0) or 0.0
+            p_val = float(getattr(book, 'price', 0.0) or 0.0)
             price = f"₹{p_val:,.2f}"
             count = book.total_sold
             demand_tag = 'LOW DEMAND' if count < 3 else 'MODERATE'
@@ -398,41 +400,27 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
 
     # 5. MOST VIEWED ITEM
     elif report_type in ['most_viewed', 'most_viewed_analytics']:
-        all_viewed_items = []
         view_field = next((vf for vf in ['views', 'views_count', 'view_count', 'click_count'] if hasattr(Book, vf)), None)
         qs = Book.objects.all()
 
         if view_field:
-            qs = qs.annotate(actual_views=Coalesce(F(view_field), 0))
-
-        for obj in qs:
-            book_no = getattr(obj, 'isbn', getattr(obj, 'id', 'N/A'))
-            title = getattr(obj, 'title', 'Unknown Item')
-            creator = getattr(obj, 'author', 'N/A')
-            raw_views = getattr(obj, 'actual_views', None) if view_field else getattr(obj, view_field, 0) if view_field else 0
-            views_val = raw_views if raw_views is not None else 0
-
-            price = getattr(obj, 'price', 0.0) or 0.0
-            price_str = f"₹{price:,.2f}"
-
-            all_viewed_items.append({
-                'book_no': book_no,
-                'title': title,
-                'creator': str(creator or 'N/A'),
-                'views': views_val,
-                'price': price_str,
-                'obj': obj
-            })
-
-        all_viewed_items.sort(key=lambda x: x['views'], reverse=True)
+            qs = qs.annotate(actual_views=Coalesce(F(view_field), 0)).order_by('-actual_views')
+        else:
+            qs = qs.annotate(actual_views=Coalesce(F('id') * 0, 0))
 
         headers = ['Sr. No.', 'Book Number', 'Book Title', 'Author', 'Price', 'Views', 'Popularity']
         if is_excel:
             headers += ['Category', 'Available Stock']
 
         details = []
-        for idx, item in enumerate(all_viewed_items, start=1):
-            views_val = item['views']
+        for idx, obj in enumerate(qs, start=1):
+            book_no = getattr(obj, 'isbn', getattr(obj, 'id', 'N/A'))
+            title = getattr(obj, 'title', 'Unknown Item')
+            creator = getattr(obj, 'author', 'N/A')
+            views_val = getattr(obj, 'actual_views', 0)
+
+            price = float(getattr(obj, 'price', 0.0) or 0.0)
+            price_str = f"₹{price:,.2f}"
             views_str = f"{views_val} Views"
 
             if views_val >= 50:
@@ -442,10 +430,9 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             else:
                 status_str = 'LOW DEMAND'
 
-            row = [idx, str(item['book_no']), item['title'], item['creator'], item['price'], views_str, status_str]
+            row = [idx, str(book_no), title, str(creator or 'N/A'), price_str, views_str, status_str]
 
             if is_excel:
-                obj = item['obj']
                 category = str(getattr(obj, 'category', 'General'))
                 stock = 'In Stock' if getattr(obj, 'is_available', True) else 'Out of Stock'
                 row += [category, stock]
@@ -562,7 +549,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             book_no = getattr(book_obj, 'isbn', getattr(book_obj, 'id', 'N/A')) if book_obj else 'N/A'
             book_title = getattr(book_obj, 'title', 'Unknown Book') if book_obj else 'Unknown Book'
             author_name = getattr(book_obj, 'author', getattr(book_obj, 'author_name', 'N/A')) if book_obj else 'N/A'
-            price = f"₹{getattr(book_obj, 'price', 0.0):,.2f}" if book_obj and hasattr(book_obj, 'price') else 'N/A'
+            price = f"₹{float(getattr(book_obj, 'price', 0.0) or 0.0):,.2f}" if book_obj and hasattr(book_obj, 'price') else 'N/A'
             
             user_obj = getattr(req, 'student', getattr(req, 'user', None))
             user_display = getattr(user_obj, 'username', str(user_obj or 'N/A'))
@@ -604,7 +591,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             book_no = getattr(book_obj, 'isbn', getattr(book_obj, 'id', 'N/A')) if book_obj else 'N/A'
             book_title = getattr(book_obj, 'title', 'Unknown Book') if book_obj else 'Unknown Book'
             author_name = getattr(book_obj, 'author', getattr(book_obj, 'author_name', 'N/A')) if book_obj else 'N/A'
-            price = f"₹{getattr(book_obj, 'price', 0.0):,.2f}" if book_obj and hasattr(book_obj, 'price') else 'N/A'
+            price = f"₹{float(getattr(book_obj, 'price', 0.0) or 0.0):,.2f}" if book_obj and hasattr(book_obj, 'price') else 'N/A'
             
             user_obj = getattr(req, 'student', getattr(req, 'user', None))
             user_display = user_obj.get_full_name() or user_obj.username if (user_obj and hasattr(user_obj, 'username')) else str(user_obj or 'N/A')
@@ -648,8 +635,9 @@ def reports_dashboard(request):
     successful_orders = Order.objects.filter(orders_filter)
     
     if amount_field:
-        revenue_sum = successful_orders.aggregate(total_sum=Sum(amount_field))['total_sum'] or 0.0
-        avg_order_val = successful_orders.aggregate(avg_val=Avg(amount_field))['avg_val'] or 0.0
+        agg_data = successful_orders.aggregate(total_sum=Sum(amount_field), avg_val=Avg(amount_field))
+        revenue_sum = agg_data['total_sum'] or 0.0
+        avg_order_val = agg_data['avg_val'] or 0.0
     else:
         revenue_sum = 0.0
         avg_order_val = 0.0
@@ -785,7 +773,7 @@ def get_report_data(request):
     page_size = request.GET.get('page_size', 10)
 
     try:
-        page_size = int(page_size)
+        page_size = max(1, int(page_size))
     except ValueError:
         page_size = 10
 
