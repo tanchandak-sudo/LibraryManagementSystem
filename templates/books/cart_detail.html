@@ -97,9 +97,9 @@
                                                             {% if item.book %}
                                                                 By {{ item.book.author|default:"Unknown Author" }}
                                                             {% elif item.art %}
-                                                                By {% if item.art.artist %}{{ item.art.artist }}{% else %}Gallery Artist{% endif %}
+                                                                By {{ item.art.artist|default:"Gallery Artist" }}
                                                             {% elif item.documentary %}
-                                                                By {% if item.documentary.director_or_author %}{{ item.documentary.director_or_author }}{% else %}Documentary Director{% endif %}
+                                                                By {{ item.documentary.director_or_author|default:"Documentary Director" }}
                                                             {% else %}
                                                                 Standard Library Media
                                                             {% endif %}
@@ -175,7 +175,6 @@
                     </div>
 
                     {% if cart_items %}
-                        <!-- Checkout Link -->
                         <a href="{% url 'books:cart_checkout' %}" class="btn btn-success btn-lg w-100 shadow-sm mb-3 fw-bold">
                             <i class="bi bi-shield-lock-fill me-2"></i>Proceed to Pay
                         </a>

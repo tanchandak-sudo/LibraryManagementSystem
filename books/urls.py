@@ -62,15 +62,13 @@ urlpatterns = [
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='books:schema'), name='swagger-ui'),
 
     # ==========================================
-    # --- 6. BOOK-SPECIFIC ACTIONS (<int:book_id>/...) ---
+    # --- 6. BOOK-SPECIFIC ACTIONS ---
     # ==========================================
     path('<int:book_id>/', views.book_detail, name='book_detail'),
     path('<int:book_id>/edit/', views.edit_book, name='edit_book'),
     path('<int:book_id>/delete/', views.delete_book, name='delete_book'),
     path('<int:book_id>/request/', views.request_book, name='request_book'),
     path('<int:book_id>/gift/', views.gift_book, name='gift_book'),
+    path('gift/<int:book_id>/', views.gift_book, name='gift_book_alias'),
     path('<int:book_id>/read/', views.read_book, name='read_book'),
-
-    path('gift/<int:book_id>/', views.gift_book, name='gift_book'),
-
 ]
