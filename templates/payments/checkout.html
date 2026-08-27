@@ -20,7 +20,6 @@
                         <p class="text-muted small">Please complete the transaction in the payment window.</p>
                     </div>
 
-                    <!-- Order Details Summary -->
                     <div class="card bg-light border-0 p-3 mb-4 text-start">
                         <div class="d-flex justify-content-between mb-2">
                             <span class="text-secondary">Item / Plan:</span>
@@ -37,7 +36,6 @@
                         </div>
                     </div>
 
-                    <!-- Manual Retry Button -->
                     <button id="rzp-button" class="btn btn-primary btn-lg w-100 shadow-sm mb-3">
                         <i class="bi bi-credit-card-fill me-2"></i>Open Payment Window
                     </button>
@@ -51,29 +49,16 @@
     </div>
 </div>
 
-<!-- Razorpay SDK Script -->
+<form id="razorpay-form" action="{% url 'books:verify_payment' %}" method="POST" style="display:none;">
+    {% csrf_token %}
+    <input type="hidden" name="razorpay_payment_id" id="razorpay_payment_id">
+    <input type="hidden" name="razorpay_order_id" id="razorpay_order_id">
+    <input type="hidden" name="razorpay_signature" id="razorpay_signature">
+</form>
+
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
-    // Helper function to extract CSRF token from cookies
-    function getCookie(name) {
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
-            }
-        }
-        return cookieValue;
-    }
-
-    const callbackUrl = "{{ callback_url|escapejs }}";
-    const csrftoken = getCookie('csrftoken');
-
     const options = {
         "key": "{{ razorpay_merchant_key|escapejs }}",
         "amount": "{{ amount_in_subunits|escapejs }}",
@@ -84,51 +69,17 @@ document.addEventListener("DOMContentLoaded", function () {
         "order_id": "{{ razorpay_order_id|escapejs }}",
         
         "handler": function (response) {
-            // Send JSON verification payload to Django payment_callback view
-            fetch(callbackUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'X-CSRFToken': csrftoken
-                },
-                body: JSON.stringify({
-                    razorpay_payment_id: response.razorpay_payment_id,
-                    razorpay_order_id: response.razorpay_order_id,
-                    razorpay_signature: response.razorpay_signature
-                })
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    window.location.href = data.redirect_url;
-                } else {
-                    alert('Payment verification failed. Please try again.');
-                    if (data.retry_url) {
-                        window.location.href = data.retry_url;
-                    }
-                }
-            })
-            .catch(error => {
-                console.error("Error verifying payment:", error);
-                alert("An error occurred during verification. Please contact support.");
-            });
+            document.getElementById('razorpay_payment_id').value = response.razorpay_payment_id;
+            document.getElementById('razorpay_order_id').value = response.razorpay_order_id;
+            document.getElementById('razorpay_signature').value = response.razorpay_signature;
+            document.getElementById('razorpay-form').submit();
         },
         
         "prefill": {
             "name": "{{ request.user.get_full_name|default:request.user.username|escapejs }}",
             "email": "{{ request.user.email|escapejs }}"
         },
-        
-        "theme": {
-            "color": "#0d6efd"
-        },
-        
-        "modal": {
-            "ondismiss": function () {
-                console.log("Payment popup closed by user.");
-            }
-        }
+        "theme": { "color": "#0d6efd" }
     };
 
     const rzp = new Razorpay(options);
