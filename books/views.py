@@ -847,19 +847,51 @@ def verify_payment(request):
             order_obj = Order.objects.filter(razorpay_order_id=razorpay_order_id).first()
 
         if order_obj:
+            # 1. Update Order Status (Reflects Total Revenue)
             if hasattr(order_obj, 'payment_id'):
                 order_obj.payment_id = payment_id
             if hasattr(order_obj, 'signature'):
                 order_obj.signature = signature
             if hasattr(order_obj, 'status'):
-                order_obj.status = 'Completed'  # Ensures revenue reports count this order
+                order_obj.status = 'Success'
             if hasattr(order_obj, 'is_paid'):
                 order_obj.is_paid = True
             order_obj.save()
 
-        # Returning redirect_url prevents the browser from loading /undefined (404)
+            # 2. Update Book Sales & User Access (Reflects in Reports)
+            try:
+                from books.models import Cart, UserBook, SalesReport
+
+                cart = Cart.objects.filter(user=request.user).first()
+                if cart:
+                    for item in cart.items.all():
+                        # Grant ownership to user
+                        UserBook.objects.get_or_create(user=request.user, book=item.book)
+
+                        # Increment total sold count on the Book model if field exists
+                        if hasattr(item.book, 'sold_count'):
+                            item.book.sold_count += item.quantity
+                            item.book.save()
+
+                        # Optional: Log explicit transaction entry for report views
+                        try:
+                            SalesReport.objects.create(
+                                user=request.user,
+                                book=item.book,
+                                amount=item.book.price * item.quantity,
+                                order=order_obj
+                            )
+                        except Exception:
+                            pass
+
+                    # Clear user's active cart
+                    cart.items.all().delete()
+
+            except Exception as report_err:
+                print(f"Report logging note: {report_err}")
+
         return JsonResponse({
-            "status": "success", 
+            "status": "success",
             "message": "Payment verified successfully!",
             "redirect_url": "/books/"
         })
