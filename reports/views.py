@@ -226,7 +226,12 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
 
     # 2. ORDERS REPORT (WITH MEAN & MEDIAN)
     elif report_type == 'orders':
-        orders_qs = Order.objects.filter(status__iexact='Success')
+        orders_filter = Q(status__iexact='Success') | Q(status__iexact='Completed')
+        if hasattr(Order, 'is_paid'):
+            orders_filter |= Q(is_paid=True)
+
+        orders_qs = Order.objects.filter(orders_filter)
+
         date_field = next((df for df in ['created_at', 'order_date', 'date', 'timestamp'] if hasattr(Order, df)), None)
         if date_field:
             orders_qs = apply_date_filter(orders_qs, date_field, date_filter, start_date, end_date).order_by(f'-{date_field}')
@@ -247,7 +252,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
         for idx, order in enumerate(orders_qs, start=1):
             order_id = f"#{getattr(order, 'id', '000')}"
             user_obj = getattr(order, 'user', getattr(order, 'student', getattr(order, 'customer', None)))
-            user_str = user_obj.get_full_name() or user_obj.username if hasattr(user_obj, 'username') else str(user_obj or 'N/A')
+            user_str = user_obj.get_full_name() or user_obj.username if (user_obj and hasattr(user_obj, 'username')) else str(user_obj or 'N/A')
             
             val = get_order_amount(order)
             amount_str = f"₹{val:,.2f}"
@@ -260,13 +265,16 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             if is_excel:
                 payment_method = str(getattr(order, 'payment_method', getattr(order, 'payment_type', 'Razorpay / Card')))
                 txn_id = str(getattr(order, 'payment_id', getattr(order, 'transaction_id', getattr(order, 'order_id', 'N/A'))))
-                email_str = user_obj.email if hasattr(user_obj, 'email') else 'N/A'
+                email_str = user_obj.email if (user_obj and hasattr(user_obj, 'email')) else 'N/A'
                 
                 items_list = []
                 if hasattr(order, 'items'):
-                    items_list = [getattr(item, 'book_title', getattr(item.book, 'title', 'Item')) for item in order.items.all()]
-                elif hasattr(order, 'book'):
+                    items_list = [getattr(item, 'book_title', getattr(getattr(item, 'book', None), 'title', 'Item')) for item in order.items.all()]
+                elif hasattr(order, 'orderitem_set'):
+                    items_list = [getattr(item, 'book_title', getattr(getattr(item, 'book', None), 'title', 'Item')) for item in order.orderitem_set.all()]
+                elif hasattr(order, 'book') and order.book:
                     items_list = [getattr(order.book, 'title', 'Book Purchased')]
+                
                 items_str = ", ".join(items_list) if items_list else "Standard Order Items"
 
                 row += [payment_method, txn_id, email_str, items_str]
@@ -290,7 +298,6 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
     elif report_type in ['most_purchased_analytics', 'most_purchased', 'Most Purchased Items']:
         date_field = next((df for df in ['created_at', 'purchase_date', 'date'] if hasattr(PurchasedBook, df)), None)
         
-        # Build filter kwargs for the annotate step if dates are provided
         filter_kwargs = {}
         if date_field and date_filter != 'all':
             now = timezone.now()
@@ -455,7 +462,11 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
     # 6. LAST 5 ORDERS
     elif report_type == 'last_5_orders':
         date_field = next((df for df in ['created_at', 'order_date', 'date', 'timestamp'] if hasattr(Order, df)), None)
-        orders_qs = Order.objects.filter(status__iexact='Success')
+        orders_filter = Q(status__iexact='Success') | Q(status__iexact='Completed')
+        if hasattr(Order, 'is_paid'):
+            orders_filter |= Q(is_paid=True)
+
+        orders_qs = Order.objects.filter(orders_filter)
         if date_field:
             orders_qs = orders_qs.order_by(f'-{date_field}')
         
@@ -469,7 +480,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
         for idx, order in enumerate(last_orders, start=1):
             order_id = f"#{getattr(order, 'id', '000')}"
             user_obj = getattr(order, 'user', getattr(order, 'student', getattr(order, 'customer', None)))
-            user_str = user_obj.get_full_name() or user_obj.username if hasattr(user_obj, 'username') else str(user_obj or 'N/A')
+            user_str = user_obj.get_full_name() or user_obj.username if (user_obj and hasattr(user_obj, 'username')) else str(user_obj or 'N/A')
             
             val = get_order_amount(order)
             amount_str = f"₹{val:,.2f}"
@@ -481,7 +492,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
 
             if is_excel:
                 pm = str(getattr(order, 'payment_method', 'Razorpay / Online'))
-                email = user_obj.email if hasattr(user_obj, 'email') else 'N/A'
+                email = user_obj.email if (user_obj and hasattr(user_obj, 'email')) else 'N/A'
                 row += [pm, email]
 
             details.append({'row': row})
@@ -495,7 +506,11 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
 
     # 7. TOTAL AMOUNT PURCHASED
     elif report_type == 'total_amount_purchased':
-        orders_qs = Order.objects.filter(status__iexact='Success')
+        orders_filter = Q(status__iexact='Success') | Q(status__iexact='Completed')
+        if hasattr(Order, 'is_paid'):
+            orders_filter |= Q(is_paid=True)
+
+        orders_qs = Order.objects.filter(orders_filter)
         date_field = next((df for df in ['created_at', 'order_date', 'date', 'timestamp'] if hasattr(Order, df)), None)
         if date_field:
             orders_qs = apply_date_filter(orders_qs, date_field, date_filter, start_date, end_date)
@@ -592,7 +607,7 @@ def fetch_report_payload(report_type, date_filter='all', start_date=None, end_da
             price = f"₹{getattr(book_obj, 'price', 0.0):,.2f}" if book_obj and hasattr(book_obj, 'price') else 'N/A'
             
             user_obj = getattr(req, 'student', getattr(req, 'user', None))
-            user_display = user_obj.get_full_name() or user_obj.username if hasattr(user_obj, 'username') else str(user_obj or 'N/A')
+            user_display = user_obj.get_full_name() or user_obj.username if (user_obj and hasattr(user_obj, 'username')) else str(user_obj or 'N/A')
             
             raw_date = getattr(req, date_field, None) if date_field else None
             approval_date_str = raw_date.strftime('%b %d, %Y') if raw_date else 'N/A'
@@ -626,7 +641,11 @@ def reports_dashboard(request):
 
     amount_field = next((af for af in ['base_amount_inr', 'charged_amount', 'amount', 'total_amount', 'total', 'price'] if hasattr(Order, af)), None)
     
-    successful_orders = Order.objects.filter(status__iexact='Success')
+    orders_filter = Q(status__iexact='Success') | Q(status__iexact='Completed')
+    if hasattr(Order, 'is_paid'):
+        orders_filter |= Q(is_paid=True)
+
+    successful_orders = Order.objects.filter(orders_filter)
     
     if amount_field:
         revenue_sum = successful_orders.aggregate(total_sum=Sum(amount_field))['total_sum'] or 0.0
