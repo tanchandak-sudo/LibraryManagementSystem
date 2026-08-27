@@ -809,97 +809,101 @@ def buy_subscription(request):
 
 @csrf_exempt
 @ratelimit(key='ip', rate='5/m', block=True)
+@login_required
 def verify_payment(request):
-    import json
-    from django.http import JsonResponse, HttpResponseBadRequest
-    from razorpay.errors import SignatureVerificationError
-
+    """
+    Verifies Razorpay payment signature, completes the order, creates 
+    purchased item records (Books, Media, Art, Documentaries), and clears the user's cart.
+    """
     if request.method != "POST":
-        return HttpResponseBadRequest("Invalid request method.")
-
-    if request.content_type == "application/json":
-        try:
-            data = json.loads(request.body)
-        except Exception:
-            data = request.POST
-    else:
-        data = request.POST
-
-    payment_id = data.get("razorpay_payment_id", "")
-    razorpay_order_id = data.get("razorpay_order_id", "")
-    signature = data.get("razorpay_signature", "")
-
-    if not all([payment_id, razorpay_order_id, signature]):
-        return JsonResponse({"status": "error", "message": "Missing payment parameters."}, status=400)
-
-    params_dict = {
-        "razorpay_order_id": razorpay_order_id,
-        "razorpay_payment_id": payment_id,
-        "razorpay_signature": signature,
-    }
+        return JsonResponse({"status": "error", "message": "Invalid request method."}, status=405)
 
     try:
-        client = get_razorpay_client()
-        client.utility.verify_payment_signature(params_dict)
+        # Load request payload (handles both JSON and standard Form data)
+        if request.content_type == "application/json":
+            data = json.loads(request.body)
+        else:
+            data = request.POST
 
-        order_obj = Order.objects.filter(order_id=razorpay_order_id).first()
-        if not order_obj:
-            order_obj = Order.objects.filter(razorpay_order_id=razorpay_order_id).first()
+        razorpay_payment_id = data.get("razorpay_payment_id")
+        razorpay_order_id = data.get("razorpay_order_id")
+        razorpay_signature = data.get("razorpay_signature")
 
-        if order_obj:
-            # 1. Update Order Status (Reflects Total Revenue)
-            if hasattr(order_obj, 'payment_id'):
-                order_obj.payment_id = payment_id
-            if hasattr(order_obj, 'signature'):
-                order_obj.signature = signature
-            if hasattr(order_obj, 'status'):
-                order_obj.status = 'Success'
-            if hasattr(order_obj, 'is_paid'):
-                order_obj.is_paid = True
-            order_obj.save()
+        if not all([razorpay_payment_id, razorpay_order_id, razorpay_signature]):
+            return JsonResponse({"status": "error", "message": "Missing payment parameters."}, status=400)
 
-            # 2. Update Book Sales & User Access (Reflects in Reports)
-            try:
-                from books.models import Cart, UserBook, SalesReport
+        # Initialize Razorpay Client
+        client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
 
-                cart = Cart.objects.filter(user=request.user).first()
-                if cart:
-                    for item in cart.items.all():
-                        # Grant ownership to user
-                        UserBook.objects.get_or_create(user=request.user, book=item.book)
+        # Verify Signature
+        params_dict = {
+            "razorpay_order_id": razorpay_order_id,
+            "razorpay_payment_id": razorpay_payment_id,
+            "razorpay_signature": razorpay_signature,
+        }
 
-                        # Increment total sold count on the Book model if field exists
-                        if hasattr(item.book, 'sold_count'):
-                            item.book.sold_count += item.quantity
-                            item.book.save()
+        try:
+            client.utility.verify_payment_signature(params_dict)
+        except razorpay.errors.SignatureVerificationError:
+            return JsonResponse({"status": "error", "message": "Payment verification failed. Invalid signature."}, status=400)
 
-                        # Optional: Log explicit transaction entry for report views
-                        try:
-                            SalesReport.objects.create(
-                                user=request.user,
-                                book=item.book,
-                                amount=item.book.price * item.quantity,
-                                order=order_obj
-                            )
-                        except Exception:
-                            pass
+        # Retrieve Order Instance
+        order = get_object_or_404(Order, order_id=razorpay_order_id)
+        
+        # Mark Order as Completed / Paid
+        order.status = "Completed"
+        if hasattr(order, "is_paid"):
+            order.is_paid = True
+        if hasattr(order, "payment_id"):
+            order.payment_id = razorpay_payment_id
+        order.save()
 
-                    # Clear user's active cart
-                    cart.items.all().delete()
+        user = request.user
 
-            except Exception as report_err:
-                print(f"Report logging note: {report_err}")
+        # Fetch all cart items for the user
+        cart_items = CartItem.objects.filter(student=user)
+
+        # Populate purchase tracking models so unit sales increment in Most/Least Purchased reports
+        for item in cart_items:
+            # 1. Handle Purchased Books
+            if item.book:
+                PurchasedBook.objects.get_or_create(
+                    student=user,
+                    book=item.book,
+                    defaults={"amount_paid": item.book.price or 39.00}
+                )
+            
+            # 2. Handle Purchased General Media Items
+            elif item.media_item:
+                PurchasedBook.objects.get_or_create(
+                    student=user,
+                    media_item=item.media_item,
+                    defaults={"amount_paid": item.media_item.price or 39.00}
+                )
+
+            # 3. Handle Purchased Art
+            elif item.art:
+                PurchasedArt.objects.get_or_create(
+                    student=user,
+                    art=item.art
+                )
+
+            # 4. Handle Purchased Documentaries
+            elif item.documentary:
+                PurchasedDocumentary.objects.get_or_create(
+                    student=user,
+                    documentary=item.documentary
+                )
+
+        # Remove items from Cart after successful purchase completion
+        cart_items.delete()
 
         return JsonResponse({
             "status": "success",
-            "message": "Payment verified successfully!",
-            "redirect_url": "/books/"
+            "message": "Payment verified successfully, items transferred to library, and cart cleared."
         })
 
-    except SignatureVerificationError:
-        return JsonResponse({"status": "error", "message": "Signature verification failed."}, status=400)
     except Exception as e:
-        print(f"Payment Verification Error: {str(e)}")
         return JsonResponse({"status": "error", "message": str(e)}, status=500)
 # def verify_payment(request):
 #     if request.method != "POST":

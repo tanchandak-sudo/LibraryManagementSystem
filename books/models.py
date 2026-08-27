@@ -222,7 +222,7 @@ class Art(models.Model):
         return f"[Art] {self.title}"
 
 
-class CartItem(models.Model):
+class   CartItem(models.Model):
     student = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
         on_delete=models.CASCADE, 
