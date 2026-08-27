@@ -168,18 +168,7 @@ def cart_detail(request):
     
     total_amount = Decimal('0.00')
     for item in cart_items:
-        if item.book:
-            price = getattr(item.book, 'price', None) or Decimal('39.00')
-        elif item.art:
-            price = getattr(item.art, 'price', None) or Decimal('59.00')
-        elif item.documentary:
-            price = getattr(item.documentary, 'price', None) or Decimal('109.00')
-        elif item.media_item:
-            price = getattr(item.media_item, 'price', None) or Decimal('39.00')
-        else:
-            price = Decimal('39.00')
-            
-        total_amount += Decimal(str(price))
+        total_amount += Decimal(str(item.subtotal))
 
     context = {
         'cart_items': cart_items,
@@ -278,7 +267,9 @@ def add_to_cart(request, book_id=None):
             msg = f'"{media_obj.title}" was added to your cart.'
             messages.success(request, msg)
         else:
-            msg = f'"{media_obj.title}" is already in your cart.'
+            item.quantity += 1
+            item.save()
+            msg = f'Updated quantity for "{media_obj.title}" in your cart.'
             messages.info(request, msg)
 
     cart_count = CartItem.objects.filter(student=request.user).count()
@@ -352,9 +343,12 @@ def add_to_cart_single(request, book_id=None):
     filter_kwargs['student'] = request.user
 
     cart_item, created = CartItem.objects.get_or_create(**filter_kwargs)
-    cart_count = CartItem.objects.filter(student=request.user).count()
+    if not created:
+        cart_item.quantity += 1
+        cart_item.save()
 
-    msg = f"'{media_obj.title}' added to cart." if created else f"'{media_obj.title}' is already in your cart."
+    cart_count = CartItem.objects.filter(student=request.user).count()
+    msg = f"'{media_obj.title}' added to cart." if created else f"Updated quantity for '{media_obj.title}' in your cart."
 
     return JsonResponse({
         'status': 'success' if created else 'info',
@@ -501,19 +495,9 @@ def cart_checkout(request):
     book_ids = []
 
     for item in cart_items:
+        total_amount_decimal += Decimal(str(item.subtotal))
         if item.book:
-            price = getattr(item.book, 'price', None) or Decimal('39.00')
             book_ids.append(item.book.id)
-        elif item.art:
-            price = getattr(item.art, 'price', None) or Decimal('59.00')
-        elif item.documentary:
-            price = getattr(item.documentary, 'price', None) or Decimal('109.00')
-        elif item.media_item:
-            price = getattr(item.media_item, 'price', None) or Decimal('39.00')
-        else:
-            price = Decimal('39.00')
-            
-        total_amount_decimal += Decimal(str(price))
 
     item_count = cart_items.count()
     total_amount_subunits = int(total_amount_decimal * 100)
@@ -812,16 +796,14 @@ def buy_subscription(request):
 @login_required
 def verify_payment(request):
     """
-    Verifies Razorpay payment signature, completes the order, creates 
-    purchased item records (Books, Media, Art, Documentaries), and clears the user's cart.
-    Handles Subscription, Cart, and Gift Purchases.
+    Verifies Razorpay payment signature, marks the Order as Success, transfers cart items 
+    to PurchasedBook/Art/Documentary records, and empties the user's cart.
     """
     if request.method != "POST":
         return JsonResponse({"status": "error", "message": "Invalid request method."}, status=405)
 
     order_obj = None
     try:
-        # Extract parameters handling JSON and Form Data formats
         if request.content_type == "application/json":
             data = json.loads(request.body)
         else:
@@ -840,7 +822,7 @@ def verify_payment(request):
             "razorpay_signature": signature,
         }
 
-        # Verify Signature
+        # Verify Signature with Razorpay SDK
         client = get_razorpay_client()
         client.utility.verify_payment_signature(params_dict)
 
@@ -853,7 +835,7 @@ def verify_payment(request):
                 order_obj.signature = signature
             if hasattr(order_obj, "is_paid"):
                 order_obj.is_paid = True
-            order_obj.status = 'Completed'
+            order_obj.status = 'Success'
             order_obj.save()
 
         # Fetch Order details & Metadata from Razorpay
@@ -875,34 +857,36 @@ def verify_payment(request):
             if not user:
                 return JsonResponse({"status": "error", "message": "Missing student ID for cart checkout."}, status=400)
 
-            cart_items = CartItem.objects.filter(student=user)
+            cart_items = CartItem.objects.filter(student=user).select_related('book', 'art', 'documentary', 'media_item')
 
             with transaction.atomic():
                 for item in cart_items:
-                    if item.book:
-                        PurchasedBook.objects.get_or_create(
-                            student=user,
-                            book=item.book,
-                            defaults={'amount_paid': getattr(item.book, 'price', None) or Decimal('39.00')}
-                        )
-                    elif item.art:
-                        PurchasedArt.objects.get_or_create(
-                            student=user,
-                            art=item.art,
-                            defaults={'amount_paid': getattr(item.art, 'price', None) or Decimal('59.00')}
-                        )
-                    elif item.documentary:
-                        PurchasedDocumentary.objects.get_or_create(
-                            student=user,
-                            documentary=item.documentary,
-                            defaults={'amount_paid': getattr(item.documentary, 'price', None) or Decimal('109.00')}
-                        )
-                    elif item.media_item:
-                        PurchasedBook.objects.get_or_create(
-                            student=user,
-                            media_item=item.media_item,
-                            defaults={'amount_paid': getattr(item.media_item, 'price', None) or Decimal('39.00')}
-                        )
+                    for _ in range(item.quantity):
+                        if item.book:
+                            PurchasedBook.objects.create(
+                                student=user,
+                                book=item.book,
+                                order=order_obj,
+                                amount_paid=getattr(item.book, 'price', None) or Decimal('39.00')
+                            )
+                        elif item.art:
+                            PurchasedArt.objects.get_or_create(
+                                student=user,
+                                art=item.art
+                            )
+                        elif item.documentary:
+                            PurchasedDocumentary.objects.get_or_create(
+                                student=user,
+                                documentary=item.documentary
+                            )
+                        elif item.media_item:
+                            PurchasedBook.objects.create(
+                                student=user,
+                                media_item=item.media_item,
+                                order=order_obj,
+                                amount_paid=getattr(item.media_item, 'price', None) or Decimal('39.00')
+                            )
+                # Empty the cart after successful payment processing
                 cart_items.delete()
 
             if request.content_type == "application/json":
@@ -924,10 +908,11 @@ def verify_payment(request):
             recipient_user = User.objects.filter(email__iexact=recipient_email).first()
 
             if recipient_user:
-                PurchasedBook.objects.get_or_create(
+                PurchasedBook.objects.create(
                     student=recipient_user,
                     book=book_obj,
-                    defaults={'amount_paid': amount_paid}
+                    order=order_obj,
+                    amount_paid=amount_paid
                 )
                 msg = f'Gift sent successfully! "{book_obj.title}" was added directly to {recipient_email}\'s library.'
             else:

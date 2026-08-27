@@ -20,7 +20,6 @@ class Book(models.Model):
     pdf = models.FileField(upload_to='books/', null=True, blank=True)
     views = models.PositiveIntegerField(default=0)
 
-
     def __str__(self):
         return self.title
 
@@ -145,6 +144,7 @@ class PurchasedBook(models.Model):
     student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='purchased_books')
     book = models.ForeignKey(Book, on_delete=models.CASCADE, null=True, blank=True)
     media_item = models.ForeignKey(MediaItem, on_delete=models.CASCADE, null=True, blank=True)
+    order = models.ForeignKey('payments.Order', on_delete=models.SET_NULL, null=True, blank=True, related_name='purchased_books')
     purchased_at = models.DateTimeField(default=timezone.now)
     amount_paid = models.DecimalField(max_digits=8, decimal_places=2, default=39.00)
 
@@ -222,7 +222,7 @@ class Art(models.Model):
         return f"[Art] {self.title}"
 
 
-class   CartItem(models.Model):
+class CartItem(models.Model):
     student = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
         on_delete=models.CASCADE, 
@@ -252,12 +252,27 @@ class   CartItem(models.Model):
         null=True, 
         blank=True
     )
+    quantity = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(default=timezone.now)
 
+    @property
+    def item(self):
+        return self.book or self.media_item or self.documentary or self.art
+
+    @property
+    def price(self):
+        item_obj = self.item
+        if not item_obj:
+            return Decimal('39.00')
+        return getattr(item_obj, 'price', None) or Decimal('39.00')
+
+    @property
+    def subtotal(self):
+        return self.price * self.quantity
+
     def __str__(self):
-        item = self.media_item or self.book or self.documentary or self.art
-        title = item.title if item else "Unknown Item"
-        return f"{self.student.username}'s Cart - {title}"
+        title = self.item.title if self.item else "Unknown Item"
+        return f"{self.student.username}'s Cart - {self.quantity} x {title}"
 
 
 class PurchasedArt(models.Model):
