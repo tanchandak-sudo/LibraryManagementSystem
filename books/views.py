@@ -808,7 +808,7 @@ def verify_payment(request):
     try:
         # 1. Parse incoming payload format (JSON vs Form Data)
         if request.content_type == "application/json":
-            data = json.loads(request.body)
+            data = json.loads(request.body.decode('utf-8'))
         else:
             data = request.POST
 
@@ -862,10 +862,8 @@ def verify_payment(request):
             if not user:
                 return JsonResponse({"status": "error", "message": "Missing user reference for cart checkout."}, status=400)
 
-            # Robust Lookup: Check both 'user' and 'student' relations on CartItem
-            cart_items = CartItem.objects.filter(
-                Q(user=user) | Q(student=user)
-            ).select_related('book', 'art', 'documentary', 'media_item')
+            # Query CartItem records attached to student user
+            cart_items = CartItem.objects.filter(student=user).select_related('book', 'art', 'documentary', 'media_item')
 
             with transaction.atomic():
                 for item in cart_items:
@@ -896,10 +894,9 @@ def verify_payment(request):
                                 amount_paid=getattr(item.media_item, 'price', None) or Decimal('39.00')
                             )
 
-                # Clear active cart
+                # Clear active cart items
                 cart_items.delete()
 
-            # Return success response with redirect target for JS
             redirect_target = reverse("books:book_list")
             messages.success(request, "Payment successful! Items added to your library.")
             

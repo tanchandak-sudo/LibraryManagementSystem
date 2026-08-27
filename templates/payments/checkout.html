@@ -49,13 +49,6 @@
     </div>
 </div>
 
-<form id="razorpay-form" action="{% url 'books:verify_payment' %}" method="POST" style="display:none;">
-    {% csrf_token %}
-    <input type="hidden" name="razorpay_payment_id" id="razorpay_payment_id">
-    <input type="hidden" name="razorpay_order_id" id="razorpay_order_id">
-    <input type="hidden" name="razorpay_signature" id="razorpay_signature">
-</form>
-
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function () {
@@ -69,10 +62,31 @@ document.addEventListener("DOMContentLoaded", function () {
         "order_id": "{{ razorpay_order_id|escapejs }}",
         
         "handler": function (response) {
-            document.getElementById('razorpay_payment_id').value = response.razorpay_payment_id;
-            document.getElementById('razorpay_order_id').value = response.razorpay_order_id;
-            document.getElementById('razorpay_signature').value = response.razorpay_signature;
-            document.getElementById('razorpay-form').submit();
+            fetch("{% url 'books:verify_payment' %}", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": "{{ csrf_token }}"
+                },
+                body: JSON.stringify({
+                    razorpay_payment_id: response.razorpay_payment_id,
+                    razorpay_order_id: response.razorpay_order_id,
+                    razorpay_signature: response.razorpay_signature
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === "success") {
+                    window.location.href = data.redirect_url || "{% url 'books:book_list' %}";
+                } else {
+                    alert("Verification Failed: " + (data.message || "Unknown error"));
+                    if (data.retry_url) window.location.href = data.retry_url;
+                }
+            })
+            .catch(err => {
+                console.error("Payment Verification Request Error:", err);
+                alert("An error occurred while verifying your payment.");
+            });
         },
         
         "prefill": {
