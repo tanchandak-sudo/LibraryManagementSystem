@@ -817,7 +817,6 @@ def verify_payment(request):
     if request.method != "POST":
         return HttpResponseBadRequest("Invalid request method.")
 
-    # 1. Parse JSON body or Form Data
     if request.content_type == "application/json":
         try:
             data = json.loads(request.body)
@@ -840,35 +839,29 @@ def verify_payment(request):
     }
 
     try:
-        # 2. Verify Razorpay Signature
         client = get_razorpay_client()
         client.utility.verify_payment_signature(params_dict)
 
-        # 3. Locate Order
         order_obj = Order.objects.filter(order_id=razorpay_order_id).first()
         if not order_obj:
             order_obj = Order.objects.filter(razorpay_order_id=razorpay_order_id).first()
 
-        # 4. Mark Order as Paid to Record Revenue
         if order_obj:
             if hasattr(order_obj, 'payment_id'):
                 order_obj.payment_id = payment_id
             if hasattr(order_obj, 'signature'):
                 order_obj.signature = signature
-            
-            # Explicitly mark order as paid so revenue reports capture it
             if hasattr(order_obj, 'status'):
-                order_obj.status = 'Completed'  # or 'Paid' depending on your model choices
+                order_obj.status = 'Completed'  # Ensures revenue reports count this order
             if hasattr(order_obj, 'is_paid'):
                 order_obj.is_paid = True
-
             order_obj.save()
 
-        # 5. Return success JSON including redirect_url to fix /undefined 404
+        # Returning redirect_url prevents the browser from loading /undefined (404)
         return JsonResponse({
-            "status": "success",
+            "status": "success", 
             "message": "Payment verified successfully!",
-            "redirect_url": "/books/"  # Redirect target after payment success
+            "redirect_url": "/books/"
         })
 
     except SignatureVerificationError:
