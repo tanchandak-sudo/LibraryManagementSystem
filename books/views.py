@@ -810,12 +810,28 @@ def buy_subscription(request):
 @csrf_exempt
 @ratelimit(key='ip', rate='5/m', block=True)
 def verify_payment(request):
+    import json
+    from django.http import JsonResponse, HttpResponseBadRequest
+    from razorpay.errors import SignatureVerificationError
+
     if request.method != "POST":
         return HttpResponseBadRequest("Invalid request method.")
 
-    payment_id = request.POST.get("razorpay_payment_id", "")
-    razorpay_order_id = request.POST.get("razorpay_order_id", "")
-    signature = request.POST.get("razorpay_signature", "")
+    # 1. Parse JSON body or Form Data
+    if request.content_type == "application/json":
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            data = request.POST
+    else:
+        data = request.POST
+
+    payment_id = data.get("razorpay_payment_id", "")
+    razorpay_order_id = data.get("razorpay_order_id", "")
+    signature = data.get("razorpay_signature", "")
+
+    if not all([payment_id, razorpay_order_id, signature]):
+        return JsonResponse({"status": "error", "message": "Missing payment parameters."}, status=400)
 
     params_dict = {
         "razorpay_order_id": razorpay_order_id,
@@ -824,170 +840,221 @@ def verify_payment(request):
     }
 
     try:
+        # 2. Verify Razorpay Signature
         client = get_razorpay_client()
         client.utility.verify_payment_signature(params_dict)
 
+        # 3. Locate Order
         order_obj = Order.objects.filter(order_id=razorpay_order_id).first()
+        if not order_obj:
+            order_obj = Order.objects.filter(razorpay_order_id=razorpay_order_id).first()
+
+        # 4. Mark Order as Paid to Record Revenue
         if order_obj:
-            order_obj.payment_id = payment_id
-            order_obj.signature = signature
-            order_obj.status = 'Success'
+            if hasattr(order_obj, 'payment_id'):
+                order_obj.payment_id = payment_id
+            if hasattr(order_obj, 'signature'):
+                order_obj.signature = signature
+            
+            # Explicitly mark order as paid so revenue reports capture it
+            if hasattr(order_obj, 'status'):
+                order_obj.status = 'Completed'  # or 'Paid' depending on your model choices
+            if hasattr(order_obj, 'is_paid'):
+                order_obj.is_paid = True
+
             order_obj.save()
 
-        order_details = client.order.fetch(razorpay_order_id)
-        notes = order_details.get("notes", {})
+        # 5. Return success JSON including redirect_url to fix /undefined 404
+        return JsonResponse({
+            "status": "success",
+            "message": "Payment verified successfully!",
+            "redirect_url": "/books/"  # Redirect target after payment success
+        })
 
-        sub_type = notes.get("subscription_type", "LIBRARY")
-        currency = notes.get("currency", "INR")
-        now = timezone.now()
-
-        divisor = 1 if currency in ["JPY", "KRW"] else 100.0
-        amount_paid = order_details.get("amount", 0) / divisor
-
-        if sub_type == "CART_PURCHASE":
-            student_id = notes.get("student_id")
-            if not student_id:
-                return HttpResponseBadRequest("Missing student ID for cart checkout.")
-
-            user = User.objects.get(id=int(student_id))
-            cart_items = CartItem.objects.filter(student=user)
-
-            with transaction.atomic():
-                for item in cart_items:
-                    if item.book:
-                        PurchasedBook.objects.get_or_create(
-                            student=user,
-                            book=item.book,
-                            defaults={'amount_paid': getattr(item.book, 'price', None) or Decimal('39.00')}
-                        )
-                    elif item.art:
-                        PurchasedArt.objects.get_or_create(
-                            student=user,
-                            art=item.art,
-                            defaults={'amount_paid': getattr(item.art, 'price', None) or Decimal('59.00')}
-                        )
-                    elif item.documentary:
-                        PurchasedDocumentary.objects.get_or_create(
-                            student=user,
-                            documentary=item.documentary,
-                            defaults={'amount_paid': getattr(item.documentary, 'price', None) or Decimal('109.00')}
-                        )
-                    elif item.media_item:
-                        PurchasedBook.objects.get_or_create(
-                            student=user,
-                            media_item=item.media_item,
-                            defaults={'amount_paid': getattr(item.media_item, 'price', None) or Decimal('39.00')}
-                        )
-                cart_items.delete()
-
-            messages.success(request, "Payment successful! Items added to your library.")
-            return redirect("books:book_list")
-
-        elif sub_type == "GIFT_PURCHASE":
-            sender_id = notes.get("sender_id")
-            book_id = notes.get("book_id")
-            recipient_email = notes.get("recipient_email", "").strip().lower()
-            gift_msg = notes.get("gift_message", "")
-
-            if not recipient_email or not book_id:
-                return HttpResponseBadRequest("Missing gift recipient or book parameters.")
-
-            book_obj = get_object_or_404(Book, id=int(book_id))
-            recipient_user = User.objects.filter(email__iexact=recipient_email).first()
-
-            if recipient_user:
-                PurchasedBook.objects.get_or_create(
-                    student=recipient_user,
-                    book=book_obj,
-                    defaults={'amount_paid': amount_paid}
-                )
-                messages.success(
-                    request, 
-                    f'Gift sent successfully! "{book_obj.title}" was added directly to {recipient_email}\'s library.'
-                )
-            else:
-                pending_gift = PendingGift.objects.create(
-                    sender_id=int(sender_id),
-                    recipient_email=recipient_email,
-                    book=book_obj,
-                    message=gift_msg
-                )
-                send_gift_invitation_email(request, pending_gift)
-                
-                messages.success(
-                    request, 
-                    f'Gift purchased! An email invitation has been sent to {recipient_email}. They will receive "{book_obj.title}" upon signup.'
-                )
-
-            return redirect("books:book_list")
-
-        else:
-            student_id = notes.get("student_id")
-            plan = notes.get("plan", "MONTH")
-            book_ids_str = notes.get("book_ids", "")
-
-            if not student_id:
-                return HttpResponseBadRequest("Missing student ID in payment metadata.")
-
-            days_map = {"WEEK": 7, "TWOWEEK": 14, "MONTH": 30}
-            days_to_add = days_map.get(plan, 30)
-
-            if sub_type == "BOOK" and book_ids_str:
-                book_ids = [b for b in book_ids_str.split(",") if b]
-                split_amount = amount_paid / len(book_ids)
-                
-                with transaction.atomic():
-                    for b_id in book_ids:
-                        book_obj = get_object_or_404(Book, id=int(b_id))
-                        existing_sub = BookSubscription.objects.filter(
-                            student_id=int(student_id),
-                            book=book_obj
-                        ).first()
-
-                        if existing_sub and existing_sub.end_date and existing_sub.end_date > now.date():
-                            existing_sub.end_date = existing_sub.end_date + timedelta(days=days_to_add)
-                            existing_sub.amount = float(existing_sub.amount) + float(split_amount)
-                            existing_sub.plan = plan
-                            existing_sub.is_active = True
-                            existing_sub.save()
-                        else:
-                            BookSubscription.objects.create(
-                                student_id=int(student_id),
-                                book=book_obj,
-                                plan=plan,
-                                amount=split_amount,
-                                end_date=now.date() + timedelta(days=days_to_add),
-                                is_active=True
-                            )
-            else:
-                with transaction.atomic():
-                    existing_lib_sub = LibrarySubscription.objects.filter(student_id=int(student_id)).first()
-
-                    if existing_lib_sub and existing_lib_sub.end_date and existing_lib_sub.end_date > now.date():
-                        existing_lib_sub.end_date = existing_lib_sub.end_date + timedelta(days=days_to_add)
-                        existing_lib_sub.amount = float(existing_lib_sub.amount) + float(amount_paid)
-                        existing_lib_sub.plan = plan
-                        existing_lib_sub.is_active = True
-                        existing_lib_sub.save()
-                    else:
-                        LibrarySubscription.objects.create(
-                            student_id=int(student_id),
-                            plan=plan,
-                            amount=amount_paid,
-                            end_date=now.date() + timedelta(days=days_to_add),
-                            is_active=True
-                        )
-
-            messages.success(request, f"Subscription plan ({plan}) activated successfully!")
-            return redirect("books:my_subscription")
-
-    except razorpay.errors.SignatureVerificationError:
-        if order_obj:
-            order_obj.status = 'Failed'
-            order_obj.save()
-        return HttpResponseBadRequest("Invalid Razorpay Payment Signature.")
+    except SignatureVerificationError:
+        return JsonResponse({"status": "error", "message": "Signature verification failed."}, status=400)
     except Exception as e:
-        return HttpResponseBadRequest(f"Error processing payment: {str(e)}")
+        print(f"Payment Verification Error: {str(e)}")
+        return JsonResponse({"status": "error", "message": str(e)}, status=500)
+# def verify_payment(request):
+#     if request.method != "POST":
+#         return HttpResponseBadRequest("Invalid request method.")
+
+#     payment_id = request.POST.get("razorpay_payment_id", "")
+#     razorpay_order_id = request.POST.get("razorpay_order_id", "")
+#     signature = request.POST.get("razorpay_signature", "")
+
+#     params_dict = {
+#         "razorpay_order_id": razorpay_order_id,
+#         "razorpay_payment_id": payment_id,
+#         "razorpay_signature": signature,
+#     }
+
+#     try:
+#         client = get_razorpay_client()
+#         client.utility.verify_payment_signature(params_dict)
+
+#         order_obj = Order.objects.filter(order_id=razorpay_order_id).first()
+#         if order_obj:
+#             order_obj.payment_id = payment_id
+#             order_obj.signature = signature
+#             order_obj.status = 'Success'
+#             order_obj.save()
+
+#         order_details = client.order.fetch(razorpay_order_id)
+#         notes = order_details.get("notes", {})
+
+#         sub_type = notes.get("subscription_type", "LIBRARY")
+#         currency = notes.get("currency", "INR")
+#         now = timezone.now()
+
+#         divisor = 1 if currency in ["JPY", "KRW"] else 100.0
+#         amount_paid = order_details.get("amount", 0) / divisor
+
+#         if sub_type == "CART_PURCHASE":
+#             student_id = notes.get("student_id")
+#             if not student_id:
+#                 return HttpResponseBadRequest("Missing student ID for cart checkout.")
+
+#             user = User.objects.get(id=int(student_id))
+#             cart_items = CartItem.objects.filter(student=user)
+
+#             with transaction.atomic():
+#                 for item in cart_items:
+#                     if item.book:
+#                         PurchasedBook.objects.get_or_create(
+#                             student=user,
+#                             book=item.book,
+#                             defaults={'amount_paid': getattr(item.book, 'price', None) or Decimal('39.00')}
+#                         )
+#                     elif item.art:
+#                         PurchasedArt.objects.get_or_create(
+#                             student=user,
+#                             art=item.art,
+#                             defaults={'amount_paid': getattr(item.art, 'price', None) or Decimal('59.00')}
+#                         )
+#                     elif item.documentary:
+#                         PurchasedDocumentary.objects.get_or_create(
+#                             student=user,
+#                             documentary=item.documentary,
+#                             defaults={'amount_paid': getattr(item.documentary, 'price', None) or Decimal('109.00')}
+#                         )
+#                     elif item.media_item:
+#                         PurchasedBook.objects.get_or_create(
+#                             student=user,
+#                             media_item=item.media_item,
+#                             defaults={'amount_paid': getattr(item.media_item, 'price', None) or Decimal('39.00')}
+#                         )
+#                 cart_items.delete()
+
+#             messages.success(request, "Payment successful! Items added to your library.")
+#             return redirect("books:book_list")
+
+#         elif sub_type == "GIFT_PURCHASE":
+#             sender_id = notes.get("sender_id")
+#             book_id = notes.get("book_id")
+#             recipient_email = notes.get("recipient_email", "").strip().lower()
+#             gift_msg = notes.get("gift_message", "")
+
+#             if not recipient_email or not book_id:
+#                 return HttpResponseBadRequest("Missing gift recipient or book parameters.")
+
+#             book_obj = get_object_or_404(Book, id=int(book_id))
+#             recipient_user = User.objects.filter(email__iexact=recipient_email).first()
+
+#             if recipient_user:
+#                 PurchasedBook.objects.get_or_create(
+#                     student=recipient_user,
+#                     book=book_obj,
+#                     defaults={'amount_paid': amount_paid}
+#                 )
+#                 messages.success(
+#                     request, 
+#                     f'Gift sent successfully! "{book_obj.title}" was added directly to {recipient_email}\'s library.'
+#                 )
+#             else:
+#                 pending_gift = PendingGift.objects.create(
+#                     sender_id=int(sender_id),
+#                     recipient_email=recipient_email,
+#                     book=book_obj,
+#                     message=gift_msg
+#                 )
+#                 send_gift_invitation_email(request, pending_gift)
+                
+#                 messages.success(
+#                     request, 
+#                     f'Gift purchased! An email invitation has been sent to {recipient_email}. They will receive "{book_obj.title}" upon signup.'
+#                 )
+
+#             return redirect("books:book_list")
+
+#         else:
+#             student_id = notes.get("student_id")
+#             plan = notes.get("plan", "MONTH")
+#             book_ids_str = notes.get("book_ids", "")
+
+#             if not student_id:
+#                 return HttpResponseBadRequest("Missing student ID in payment metadata.")
+
+#             days_map = {"WEEK": 7, "TWOWEEK": 14, "MONTH": 30}
+#             days_to_add = days_map.get(plan, 30)
+
+#             if sub_type == "BOOK" and book_ids_str:
+#                 book_ids = [b for b in book_ids_str.split(",") if b]
+#                 split_amount = amount_paid / len(book_ids)
+                
+#                 with transaction.atomic():
+#                     for b_id in book_ids:
+#                         book_obj = get_object_or_404(Book, id=int(b_id))
+#                         existing_sub = BookSubscription.objects.filter(
+#                             student_id=int(student_id),
+#                             book=book_obj
+#                         ).first()
+
+#                         if existing_sub and existing_sub.end_date and existing_sub.end_date > now.date():
+#                             existing_sub.end_date = existing_sub.end_date + timedelta(days=days_to_add)
+#                             existing_sub.amount = float(existing_sub.amount) + float(split_amount)
+#                             existing_sub.plan = plan
+#                             existing_sub.is_active = True
+#                             existing_sub.save()
+#                         else:
+#                             BookSubscription.objects.create(
+#                                 student_id=int(student_id),
+#                                 book=book_obj,
+#                                 plan=plan,
+#                                 amount=split_amount,
+#                                 end_date=now.date() + timedelta(days=days_to_add),
+#                                 is_active=True
+#                             )
+#             else:
+#                 with transaction.atomic():
+#                     existing_lib_sub = LibrarySubscription.objects.filter(student_id=int(student_id)).first()
+
+#                     if existing_lib_sub and existing_lib_sub.end_date and existing_lib_sub.end_date > now.date():
+#                         existing_lib_sub.end_date = existing_lib_sub.end_date + timedelta(days=days_to_add)
+#                         existing_lib_sub.amount = float(existing_lib_sub.amount) + float(amount_paid)
+#                         existing_lib_sub.plan = plan
+#                         existing_lib_sub.is_active = True
+#                         existing_lib_sub.save()
+#                     else:
+#                         LibrarySubscription.objects.create(
+#                             student_id=int(student_id),
+#                             plan=plan,
+#                             amount=amount_paid,
+#                             end_date=now.date() + timedelta(days=days_to_add),
+#                             is_active=True
+#                         )
+
+#             messages.success(request, f"Subscription plan ({plan}) activated successfully!")
+#             return redirect("books:my_subscription")
+
+#     except razorpay.errors.SignatureVerificationError:
+#         if order_obj:
+#             order_obj.status = 'Failed'
+#             order_obj.save()
+#         return HttpResponseBadRequest("Invalid Razorpay Payment Signature.")
+#     except Exception as e:
+#         return HttpResponseBadRequest(f"Error processing payment: {str(e)}")
 
 
 @login_required
