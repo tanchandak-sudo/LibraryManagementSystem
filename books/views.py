@@ -791,19 +791,22 @@ def buy_subscription(request):
         return render(request, 'payments/checkout.html', context)
 
 
+def get_razorpay_client():
+    return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
 @csrf_exempt
-@ratelimit(key='ip', rate='5/m', block=True)
 @login_required
 def verify_payment(request):
     """
-    Verifies Razorpay payment signature, marks the Order as Success, transfers cart items 
-    to PurchasedBook/Art/Documentary records, and empties the user's cart.
+    Verifies Razorpay payment signature, updates Order status, transfers cart items 
+    to Purchased records for report tracking, and empties the cart.
     """
     if request.method != "POST":
         return JsonResponse({"status": "error", "message": "Invalid request method."}, status=405)
 
     order_obj = None
     try:
+        # 1. Parse incoming payload format (JSON vs Form Data)
         if request.content_type == "application/json":
             data = json.loads(request.body)
         else:
@@ -822,11 +825,11 @@ def verify_payment(request):
             "razorpay_signature": signature,
         }
 
-        # Verify Signature with Razorpay SDK
+        # 2. Verify Payment Signature
         client = get_razorpay_client()
         client.utility.verify_payment_signature(params_dict)
 
-        # Retrieve and update Order record
+        # 3. Retrieve and update Order status for Reports
         order_obj = Order.objects.filter(order_id=razorpay_order_id).first()
         if order_obj:
             if hasattr(order_obj, "payment_id"):
@@ -838,7 +841,7 @@ def verify_payment(request):
             order_obj.status = 'Success'
             order_obj.save()
 
-        # Fetch Order details & Metadata from Razorpay
+        # 4. Fetch Order metadata from Razorpay API
         order_details = client.order.fetch(razorpay_order_id)
         notes = order_details.get("notes", {})
 
@@ -849,52 +852,68 @@ def verify_payment(request):
         divisor = 1 if currency in ["JPY", "KRW"] else 100.0
         amount_paid = order_details.get("amount", 0) / divisor
 
+        # ==========================================
         # --- 1. CART PURCHASES ---
+        # ==========================================
         if sub_type == "CART_PURCHASE":
             student_id = notes.get("student_id")
             user = User.objects.filter(id=int(student_id)).first() if student_id else request.user
 
             if not user:
-                return JsonResponse({"status": "error", "message": "Missing student ID for cart checkout."}, status=400)
+                return JsonResponse({"status": "error", "message": "Missing user reference for cart checkout."}, status=400)
 
-            cart_items = CartItem.objects.filter(student=user).select_related('book', 'art', 'documentary', 'media_item')
+            # Robust Lookup: Check both 'user' and 'student' relations on CartItem
+            cart_items = CartItem.objects.filter(
+                Q(user=user) | Q(student=user)
+            ).select_related('book', 'art', 'documentary', 'media_item')
 
             with transaction.atomic():
                 for item in cart_items:
-                    for _ in range(item.quantity):
-                        if item.book:
+                    qty = getattr(item, 'quantity', 1)
+                    for _ in range(qty):
+                        if getattr(item, 'book', None):
                             PurchasedBook.objects.create(
                                 student=user,
                                 book=item.book,
                                 order=order_obj,
                                 amount_paid=getattr(item.book, 'price', None) or Decimal('39.00')
                             )
-                        elif item.art:
+                        elif getattr(item, 'art', None):
                             PurchasedArt.objects.get_or_create(
                                 student=user,
                                 art=item.art
                             )
-                        elif item.documentary:
+                        elif getattr(item, 'documentary', None):
                             PurchasedDocumentary.objects.get_or_create(
                                 student=user,
                                 documentary=item.documentary
                             )
-                        elif item.media_item:
+                        elif getattr(item, 'media_item', None):
                             PurchasedBook.objects.create(
                                 student=user,
                                 media_item=item.media_item,
                                 order=order_obj,
                                 amount_paid=getattr(item.media_item, 'price', None) or Decimal('39.00')
                             )
-                # Empty the cart after successful payment processing
+
+                # Clear active cart
                 cart_items.delete()
 
-            if request.content_type == "application/json":
-                return JsonResponse({"status": "success", "message": "Payment successful! Items added to your library."})
+            # Return success response with redirect target for JS
+            redirect_target = reverse("books:book_list")
             messages.success(request, "Payment successful! Items added to your library.")
-            return redirect("books:book_list")
+            
+            if request.content_type == "application/json":
+                return JsonResponse({
+                    "status": "success",
+                    "message": "Payment successful! Items added to your library.",
+                    "redirect_url": redirect_target
+                })
+            return redirect(redirect_target)
 
+        # ==========================================
         # --- 2. GIFT PURCHASES ---
+        # ==========================================
         elif sub_type == "GIFT_PURCHASE":
             sender_id = notes.get("sender_id")
             book_id = notes.get("book_id")
@@ -902,7 +921,7 @@ def verify_payment(request):
             gift_msg = notes.get("gift_message", "")
 
             if not recipient_email or not book_id:
-                return JsonResponse({"status": "error", "message": "Missing gift recipient or book parameters."}, status=400)
+                return JsonResponse({"status": "error", "message": "Missing gift parameters."}, status=400)
 
             book_obj = get_object_or_404(Book, id=int(book_id))
             recipient_user = User.objects.filter(email__iexact=recipient_email).first()
@@ -914,7 +933,7 @@ def verify_payment(request):
                     order=order_obj,
                     amount_paid=amount_paid
                 )
-                msg = f'Gift sent successfully! "{book_obj.title}" was added directly to {recipient_email}\'s library.'
+                msg = f'Gift sent successfully! "{book_obj.title}" added to {recipient_email}\'s library.'
             else:
                 pending_gift = PendingGift.objects.create(
                     sender_id=int(sender_id),
@@ -923,14 +942,17 @@ def verify_payment(request):
                     message=gift_msg
                 )
                 send_gift_invitation_email(request, pending_gift)
-                msg = f'Gift purchased! An email invitation has been sent to {recipient_email}. They will receive "{book_obj.title}" upon signup.'
+                msg = f'Gift invitation sent to {recipient_email}.'
 
-            if request.content_type == "application/json":
-                return JsonResponse({"status": "success", "message": msg})
+            redirect_target = reverse("books:book_list")
             messages.success(request, msg)
-            return redirect("books:book_list")
+            if request.content_type == "application/json":
+                return JsonResponse({"status": "success", "message": msg, "redirect_url": redirect_target})
+            return redirect(redirect_target)
 
+        # ==========================================
         # --- 3. SUBSCRIPTION PURCHASES ---
+        # ==========================================
         else:
             student_id = notes.get("student_id") or request.user.id
             plan = notes.get("plan", "MONTH")
@@ -986,21 +1008,23 @@ def verify_payment(request):
                         )
 
             msg = f"Subscription plan ({plan}) activated successfully!"
-            if request.content_type == "application/json":
-                return JsonResponse({"status": "success", "message": msg})
+            redirect_target = reverse("books:my_subscription")
             messages.success(request, msg)
-            return redirect("books:my_subscription")
+
+            if request.content_type == "application/json":
+                return JsonResponse({"status": "success", "message": msg, "redirect_url": redirect_target})
+            return redirect(redirect_target)
 
     except razorpay.errors.SignatureVerificationError:
         if order_obj:
             order_obj.status = 'Failed'
             order_obj.save()
         if request.content_type == "application/json":
-            return JsonResponse({"status": "error", "message": "Invalid Razorpay Payment Signature."}, status=400)
-        return HttpResponseBadRequest("Invalid Razorpay Payment Signature.")
+            return JsonResponse({"status": "error", "message": "Invalid Payment Signature.", "retry_url": reverse("books:cart_detail")}, status=400)
+        return HttpResponseBadRequest("Invalid Payment Signature.")
     except Exception as e:
         if request.content_type == "application/json":
-            return JsonResponse({"status": "error", "message": str(e)}, status=500)
+            return JsonResponse({"status": "error", "message": str(e), "retry_url": reverse("books:cart_detail")}, status=500)
         return HttpResponseBadRequest(f"Error processing payment: {str(e)}")
 
 
