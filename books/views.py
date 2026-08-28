@@ -791,22 +791,18 @@ def buy_subscription(request):
         return render(request, 'payments/checkout.html', context)
 
 
-def get_razorpay_client():
-    return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
-
 @csrf_exempt
 @login_required
 def verify_payment(request):
     """
     Verifies Razorpay payment signature, updates Order status, transfers cart items 
-    to Purchased records for report tracking, and empties the cart.
+    to Purchased records for report tracking, empties the cart, and redirects to confirmation page.
     """
     if request.method != "POST":
         return JsonResponse({"status": "error", "message": "Invalid request method."}, status=405)
 
     order_obj = None
     try:
-        # 1. Parse incoming payload format (JSON vs Form Data)
         if request.content_type == "application/json":
             data = json.loads(request.body.decode('utf-8'))
         else:
@@ -825,11 +821,9 @@ def verify_payment(request):
             "razorpay_signature": signature,
         }
 
-        # 2. Verify Payment Signature
         client = get_razorpay_client()
         client.utility.verify_payment_signature(params_dict)
 
-        # 3. Retrieve and update Order status for Reports
         order_obj = Order.objects.filter(order_id=razorpay_order_id).first()
         if order_obj:
             if hasattr(order_obj, "payment_id"):
@@ -841,7 +835,6 @@ def verify_payment(request):
             order_obj.status = 'Success'
             order_obj.save()
 
-        # 4. Fetch Order metadata from Razorpay API
         order_details = client.order.fetch(razorpay_order_id)
         notes = order_details.get("notes", {})
 
@@ -862,7 +855,6 @@ def verify_payment(request):
             if not user:
                 return JsonResponse({"status": "error", "message": "Missing user reference for cart checkout."}, status=400)
 
-            # Query CartItem records attached to student user
             cart_items = CartItem.objects.filter(student=user).select_related('book', 'art', 'documentary', 'media_item')
 
             with transaction.atomic():
@@ -894,10 +886,11 @@ def verify_payment(request):
                                 amount_paid=getattr(item.media_item, 'price', None) or Decimal('39.00')
                             )
 
-                # Clear active cart items
-                cart_items.delete()
+                # Explicitly empty cart after payment
+                CartItem.objects.filter(student=user).delete()
 
-            redirect_target = reverse("books:book_list")
+            # Redirect target to dedicated confirmation page
+            redirect_target = reverse("books:payment_confirmation", kwargs={"order_id": order_obj.id if order_obj else 0})
             messages.success(request, "Payment successful! Items added to your library.")
             
             if request.content_type == "application/json":
@@ -941,7 +934,7 @@ def verify_payment(request):
                 send_gift_invitation_email(request, pending_gift)
                 msg = f'Gift invitation sent to {recipient_email}.'
 
-            redirect_target = reverse("books:book_list")
+            redirect_target = reverse("books:payment_confirmation", kwargs={"order_id": order_obj.id if order_obj else 0})
             messages.success(request, msg)
             if request.content_type == "application/json":
                 return JsonResponse({"status": "success", "message": msg, "redirect_url": redirect_target})
@@ -1005,7 +998,7 @@ def verify_payment(request):
                         )
 
             msg = f"Subscription plan ({plan}) activated successfully!"
-            redirect_target = reverse("books:my_subscription")
+            redirect_target = reverse("books:payment_confirmation", kwargs={"order_id": order_obj.id if order_obj else 0})
             messages.success(request, msg)
 
             if request.content_type == "application/json":
@@ -1023,6 +1016,17 @@ def verify_payment(request):
         if request.content_type == "application/json":
             return JsonResponse({"status": "error", "message": str(e), "retry_url": reverse("books:cart_detail")}, status=500)
         return HttpResponseBadRequest(f"Error processing payment: {str(e)}")
+
+
+@login_required
+def payment_confirmation(request, order_id):
+    order = get_object_or_404(Order, id=order_id, user=request.user)
+    purchased_items = PurchasedBook.objects.filter(order=order).select_related('book', 'media_item')
+    
+    return render(request, 'payments/confirmation.html', {
+        'order': order,
+        'purchased_items': purchased_items
+    })
 
 
 @login_required
