@@ -119,4 +119,4 @@ if not DEBUG:
     # Disabled HTTPS enforcement until an SSL certificate is installed
     SESSION_COOKIE_SECURE = False
     CSRF_COOKIE_SECURE = False
-    SECURE_SSL_REDIRECT = True
+    SECURE_SSL_REDIRECT = False
