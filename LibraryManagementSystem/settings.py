@@ -88,6 +88,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Dynamic Payment Keys fetched from .env
 RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID')
 RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET')
+RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET')
 
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'books:book_list'
